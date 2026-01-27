@@ -12,6 +12,49 @@ from frappe import _
 import time
 
 
+# NOTE: Map display folder names to Microsoft Graph API well-known folder names
+# Graph API expects lowercase, specific naming (e.g., 'sentitems' not 'Sent Items')
+FOLDER_NAME_MAP = {
+    "inbox": "inbox",
+    "sent": "sentitems",
+    "sent items": "sentitems",
+    "sentitems": "sentitems",
+    "drafts": "drafts",
+    "draft": "drafts",
+    "deleted": "deleteditems",
+    "deleted items": "deleteditems",
+    "deleteditems": "deleteditems",
+    "trash": "deleteditems",
+    "junk": "junkemail",
+    "junk email": "junkemail",
+    "junkemail": "junkemail",
+    "spam": "junkemail",
+    "archive": "archive",
+    "outbox": "outbox",
+    "scheduled": "scheduled",
+}
+
+
+def NormalizeFolderName(folderName: str) -> str:
+    """
+    Convert display folder name to Microsoft Graph API well-known folder name.
+
+    Microsoft Graph API expects specific well-known folder names:
+    - inbox, sentitems, drafts, deleteditems, junkemail, archive, outbox, etc.
+
+    Args:
+        folderName: Display name like "Inbox", "Sent Items", "Draft", etc.
+
+    Returns:
+        str: Graph API well-known folder name or original if not mapped
+    """
+    if not folderName:
+        return "inbox"
+
+    normalizedName = folderName.lower().strip()
+    return FOLDER_NAME_MAP.get(normalizedName, folderName)
+
+
 def make_graph_request(endpoint, access_token, method='GET', data=None, params=None):
 	"""
 	Generic Graph API request handler
@@ -91,7 +134,9 @@ def get_user_messages(user_email, access_token, folder='inbox', top=50, select=N
 	Returns:
 		dict: Response with messages
 	"""
-	endpoint = f"/users/{user_email}/mailFolders/{folder}/messages"
+	# NOTE: Normalize folder name for Graph API compatibility
+	normalizedFolder = NormalizeFolderName(folder)
+	endpoint = f"/users/{user_email}/mailFolders/{normalizedFolder}/messages"
 
 	params = {
 		"$top": top,
@@ -121,8 +166,9 @@ def get_messages_delta(user_email, access_token, folder='inbox', delta_token=Non
 		# Use the delta token URL directly
 		endpoint = delta_token
 	else:
-		# Initial delta query
-		endpoint = f"/users/{user_email}/mailFolders/{folder}/messages/delta"
+		# NOTE: Normalize folder name for Graph API compatibility
+		normalizedFolder = NormalizeFolderName(folder)
+		endpoint = f"/users/{user_email}/mailFolders/{normalizedFolder}/messages/delta"
 
 	return make_graph_request(endpoint, access_token)
 

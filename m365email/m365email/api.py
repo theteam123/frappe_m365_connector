@@ -388,3 +388,69 @@ def update_folder_filters(email_account_name, folders):
 		"message": _("Folder filters updated successfully")
 	}
 
+
+
+
+@frappe.whitelist()
+def SendEmailQueueNow(queues: str | list) -> dict:
+	"""
+	Immediately process and send selected emails from the Email Queue.
+
+	Unlike retry_sending which just marks emails for later processing,
+	this function immediately sends the emails.
+
+	Args:
+		queues: List of Email Queue names or JSON string of names
+
+	Returns:
+		dict: Results with sent count, failed count, and any errors
+	"""
+	import json
+
+	if not frappe.has_permission("Email Queue"):
+		frappe.throw(_("You don't have permission to access Email Queue"))
+
+	if isinstance(queues, str):
+		queues = json.loads(queues)
+
+	if not queues:
+		return {"sent": 0, "failed": 0, "errors": []}
+
+	sentCount = 0
+	failedCount = 0
+	errors = []
+
+	for queueName in queues:
+		try:
+			queueDoc = frappe.get_doc("Email Queue", queueName)
+
+			if queueDoc.status not in ["Not Sent", "Partially Sent", "Error"]:
+				continue
+
+			queueDoc.send(force_send=True)
+			queueDoc.reload()
+
+			if queueDoc.status == "Sent":
+				sentCount += 1
+			elif queueDoc.status in ["Error", "Partially Sent"]:
+				failedCount += 1
+				errors.append({
+					"name": queueName,
+					"error": queueDoc.error or "Unknown error"
+				})
+
+		except Exception as e:
+			failedCount += 1
+			errors.append({
+				"name": queueName,
+				"error": str(e)
+			})
+
+	frappe.db.commit()
+
+	return {
+		"sent": sentCount,
+		"failed": failedCount,
+		"errors": errors
+	}
+

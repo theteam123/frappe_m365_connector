@@ -26,7 +26,7 @@ app_license = "mit"
 
 # include js, css files in header of desk.html
 # app_include_css = "/assets/m365email/css/m365email.css"
-# app_include_js = "/assets/m365email/js/m365email.js"
+app_include_js = "/assets/m365email/js/email_queue_list.js"
 
 # include js, css files in header of web template
 # web_include_css = "/assets/m365email/css/m365email.css"
@@ -46,7 +46,9 @@ app_license = "mit"
 doctype_js = {
 	"Email Account": "public/js/email_account.js"
 }
-# doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
+doctype_list_js = {
+	"Email Queue": "public/js/email_queue_list.js"
+}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
 
@@ -130,12 +132,13 @@ after_migrate = "m365email.m365email.custom_fields.create_m365_custom_fields"
 # -----------
 # Permissions evaluated in scripted ways
 
-# permission_query_conditions = {
-# 	"Event": "frappe.desk.doctype.event.event.get_permission_query_conditions",
-# }
-#
+permission_query_conditions = {
+	"Communication": "m365email.m365email.permissions.get_communication_permission_query_conditions",
+}
+
 has_permission = {
 	"M365 Email Account": "m365email.m365email.doctype.m365_email_account.m365_email_account.has_permission",
+	"Communication": "m365email.m365email.permissions.has_communication_permission",
 }
 
 # DocType Class
@@ -168,7 +171,8 @@ override_doctype_class = {
 
 scheduler_events = {
 	"cron": {
-		"*/5 * * * *": [
+		# NOTE: Runs every minute, but tasks check configured interval on Service Principal
+		"* * * * *": [
 			"m365email.m365email.tasks.sync_all_email_accounts",
 			"m365email.m365email.tasks.sync_all_calendar_events"
 		]

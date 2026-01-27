@@ -29,7 +29,7 @@
    "fieldtype": "Link",
    "in_list_view": 1,
    "label": "Email Account",
-   "options": "M365 Email Account",
+   "options": "Email Account",
    "reqd": 1
   },
   {
