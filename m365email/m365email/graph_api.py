@@ -349,6 +349,140 @@ def get_calendar_event_details(user_email, event_id, access_token):
 	return make_graph_request(endpoint, access_token)
 
 
+def SetReadStatus(
+	userEmail: str,
+	messageID: str,
+	accessToken: str,
+	isRead: bool
+) -> dict:
+	"""
+	Set read/unread status on a message in M365.
+
+	Args:
+		userEmail: User's email address
+		messageID: Graph API message ID
+		accessToken: Access token
+		isRead: True to mark as read, False to mark as unread
+
+	Returns:
+		dict: Response data
+	"""
+	endpoint = f"/users/{userEmail}/messages/{messageID}"
+	data = {"isRead": isRead}
+	return make_graph_request(endpoint, accessToken, method="PATCH", data=data)
+
+
+
+def SetReadStatusSafe(
+	userEmail: str,
+	messageID: str,
+	accessToken: str,
+	isRead: bool
+) -> dict:
+	"""
+	Set read/unread status on a message in M365 (non-throwing).
+	Logs errors but does not raise exceptions.
+
+	Args:
+		userEmail: User's email address
+		messageID: Graph API message ID
+		accessToken: Access token
+		isRead: True to mark as read, False to mark as unread
+
+	Returns:
+		dict: {"success": bool, "message": str}
+	"""
+	statusLabel = "read" if isRead else "unread"
+	try:
+		SetReadStatus(userEmail, messageID, accessToken, isRead)
+		return {
+			"success": True,
+			"message": f"Marked as {statusLabel}",
+		}
+	except Exception as e:
+		frappe.log_error(
+			title="M365 Read Status Sync Failed",
+			message=(
+				f"Failed to mark message {messageID} as {statusLabel} "
+				f"for {userEmail}: {str(e)}"
+			)
+		)
+		return {
+			"success": False,
+			"message": str(e),
+		}
+
+
+
+def MoveMessage(
+	userEmail: str,
+	messageID: str,
+	accessToken: str,
+	destinationFolder: str
+) -> dict:
+	"""
+	Move a message to a different folder in M365.
+
+	Args:
+		userEmail: User's email address
+		messageID: Graph API message ID
+		accessToken: Access token
+		destinationFolder: Target folder name (archive, trash, spam, inbox)
+
+	Returns:
+		dict: Response with moved message data (includes new message ID)
+	"""
+	normalizedFolder = NormalizeFolderName(destinationFolder)
+	endpoint = f"/users/{userEmail}/messages/{messageID}/move"
+	data = {"destinationId": normalizedFolder}
+	return make_graph_request(endpoint, accessToken, method="POST", data=data)
+
+
+
+def MoveMessageSafe(
+	userEmail: str,
+	messageID: str,
+	accessToken: str,
+	destinationFolder: str
+) -> dict:
+	"""
+	Move a message to a different folder in M365 (non-throwing).
+	Logs errors but does not raise exceptions.
+
+	Args:
+		userEmail: User's email address
+		messageID: Graph API message ID
+		accessToken: Access token
+		destinationFolder: Target folder name
+
+	Returns:
+		dict: {"success": bool, "message": str, "data": dict or None}
+	"""
+	try:
+		responseData = MoveMessage(
+			userEmail, messageID, accessToken, destinationFolder
+		)
+		return {
+			"success": True,
+			"message": f"Moved to {destinationFolder}",
+			"data": responseData
+		}
+	except Exception as e:
+		frappe.log_error(
+			title="M365 Provider Sync Failed",
+			message=(
+				f"Failed to move message {messageID} to {destinationFolder} "
+				f"for {userEmail}: {str(e)}"
+			)
+		)
+		return {
+			"success": False,
+			"message": str(e),
+			"data": None
+		}
+
+
+
 def send_email_as_user(sender_email, recipients, subject, body, access_token, cc=None, bcc=None, attachments=None, is_html=True):
 	"""
 	Send email as a specific user using Microsoft Graph API
