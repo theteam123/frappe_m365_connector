@@ -1,16 +1,17 @@
 {
  "actions": [],
+ "allow_import": 1,
  "allow_rename": 1,
  "autoname": "field:account_name",
- "creation": "2025-01-24 12:00:00.000000",
+ "creation": "2025-01-24 12:00:00",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
-  "account_name",
-  "account_type",
-  "email_address",
   "user",
+  "account_type",
+  "account_name",
+  "email_address",
   "role",
   "service_principal",
   "enable_incoming",
@@ -35,8 +36,10 @@
  ],
  "fields": [
   {
+   "fetch_from": "user.full_name",
    "fieldname": "account_name",
    "fieldtype": "Data",
+   "in_list_view": 1,
    "label": "Account Name",
    "reqd": 1,
    "unique": 1
@@ -45,20 +48,25 @@
    "default": "User Mailbox",
    "fieldname": "account_type",
    "fieldtype": "Select",
+   "in_list_view": 1,
    "label": "Account Type",
    "options": "User Mailbox\nShared Mailbox",
    "reqd": 1
   },
   {
+   "fetch_from": "user.email",
    "fieldname": "email_address",
    "fieldtype": "Data",
+   "in_list_view": 1,
    "label": "Email Address",
    "reqd": 1
   },
   {
    "fieldname": "user",
    "fieldtype": "Link",
+   "in_list_view": 1,
    "label": "User",
+   "link_filters": "[[\"User\",\"role\",\"=\",\"Projects User\"]]",
    "options": "User",
    "reqd": 1
   },
@@ -70,6 +78,7 @@
    "options": "Role"
   },
   {
+   "default": "SGC Australia",
    "fieldname": "service_principal",
    "fieldtype": "Link",
    "label": "Service Principal",
@@ -196,9 +205,9 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-01-24 12:00:00.000000",
+ "modified": "2026-01-18 20:35:23.352492",
  "modified_by": "Administrator",
- "module": "M365email",
+ "module": "M365Email",
  "name": "M365 Email Account",
  "naming_rule": "By fieldname",
  "owner": "Administrator",
@@ -234,9 +243,9 @@
    "write": 1
   }
  ],
+ "row_format": "Dynamic",
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": [],
  "track_changes": 1
 }
-
