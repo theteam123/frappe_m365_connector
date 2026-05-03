@@ -2,14 +2,25 @@
 # For license information, please see license.txt
 
 """
-Email Account doctype override for M365 integration.
+Email Account doctype override.
 
-This module extends the standard Email Account class to support M365
-service type, handling:
+NOTE: This override is registered globally via `override_doctype_class` in
+hooks.py and therefore applies to ALL Email Accounts — Gmail, generic IMAP,
+POP3, and M365 alike — not just M365 accounts. M365-specific behaviour is
+dispatched only when `self.service == "M365"`; for every other service, each
+overridden method delegates to the base `EmailAccount` via `super()`.
+
+This means tracebacks from non-M365 accounts (e.g. Gmail OAuth refresh
+failures) will reference this file and the `ExtendedEmailAccount` class. That
+is expected — it does not indicate an M365 problem. The actual provider can
+be identified from `self.service` and `self.email_id` in the traceback locals.
+
+Responsibilities:
 - M365-specific validation (skip SMTP/IMAP validation)
-- Email receiving via Graph API delta sync
-- Access token management through service principal
+- Email receiving via Graph API delta sync (M365 only)
+- Access token management through service principal (M365 only)
 - Override of find_outgoing to include M365 accounts
+- Linked-user validation (applies to all services)
 """
 
 import frappe
@@ -18,14 +29,22 @@ from frappe.email.doctype.email_account.email_account import EmailAccount
 from frappe.utils import now_datetime
 
 
-class M365EmailAccount(EmailAccount):
+class ExtendedEmailAccount(EmailAccount):
 	"""
-	Extended Email Account class with M365 support.
-	
-	When service='M365', this class:
-	- Skips SMTP/IMAP validation
-	- Uses Graph API for receiving emails
-	- Gets access tokens from linked service principal
+	Override class for the standard Email Account doctype.
+
+	NOTE: Registered as the global `override_doctype_class` for "Email Account"
+	in hooks.py — this class wraps EVERY Email Account regardless of service,
+	not just M365 ones. Methods dispatch on `self.service`:
+
+	- When `service == "M365"`: skip SMTP/IMAP validation, use Graph API for
+	  receiving, and resolve access tokens via the linked service principal.
+	- For all other services (Gmail, generic IMAP, POP3, etc.): delegate to
+	  the base `EmailAccount` implementation via `super()`.
+
+	The class name was previously `M365EmailAccount`, which misled readers into
+	attributing non-M365 errors to M365. Renamed to `ExtendedEmailAccount` to
+	reflect the actual scope.
 	"""
 	
 	def validate(self):
