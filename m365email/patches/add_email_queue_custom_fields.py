@@ -28,7 +28,7 @@ def execute():
 				"fieldname": "m365_account",
 				"label": "M365 Account",
 				"fieldtype": "Link",
-				"options": "M365 Email Account",
+				"options": "Email Account",
 				"insert_after": "m365_send",
 				"read_only": 1,
 				"no_copy": 1

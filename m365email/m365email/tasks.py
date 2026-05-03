@@ -7,124 +7,230 @@ Scheduled tasks for M365 Email Integration
 
 import frappe
 from frappe import _
+from frappe.utils import now_datetime, time_diff_in_seconds
 from m365email.m365email.sync import sync_email_account
 from m365email.m365email.event_sync import sync_calendar_events
 from m365email.m365email.auth import refresh_token, test_connection
 
 
+# NOTE: Default intervals used when Service Principal settings are not configured
+DEFAULT_EMAIL_SYNC_INTERVAL_MINUTES = 5
+DEFAULT_CALENDAR_SYNC_INTERVAL_MINUTES = 5
+
+
+def ShouldSyncServicePrincipal(servicePrincipalName: str, syncType: str) -> bool:
+	"""
+	Check if enough time has passed since the last sync for a Service Principal.
+
+	Args:
+		servicePrincipalName: Name of the Service Principal
+		syncType: Either 'email' or 'calendar'
+
+	Returns:
+		bool: True if sync should proceed, False if interval hasn't elapsed
+	"""
+	if not servicePrincipalName:
+		return True
+
+	try:
+		spDoc = frappe.get_doc("M365 Email Service Principal Settings", servicePrincipalName)
+	except frappe.DoesNotExistError:
+		return True
+
+	if syncType == "email":
+		intervalMinutes = spDoc.email_sync_interval_minutes or DEFAULT_EMAIL_SYNC_INTERVAL_MINUTES
+		lastSync = spDoc.last_email_sync
+	else:
+		intervalMinutes = spDoc.calendar_sync_interval_minutes or DEFAULT_CALENDAR_SYNC_INTERVAL_MINUTES
+		lastSync = spDoc.last_calendar_sync
+
+	# NOTE: Ensure minimum interval of 1 minute
+	intervalMinutes = max(1, intervalMinutes)
+
+	if not lastSync:
+		return True
+
+	secondsSinceLastSync = time_diff_in_seconds(now_datetime(), lastSync)
+	intervalSeconds = intervalMinutes * 60
+
+	return secondsSinceLastSync >= intervalSeconds
+
+
+def UpdateServicePrincipalLastSync(servicePrincipalName: str, syncType: str) -> None:
+	"""
+	Update the last sync timestamp for a Service Principal.
+
+	Args:
+		servicePrincipalName: Name of the Service Principal
+		syncType: Either 'email' or 'calendar'
+	"""
+	if not servicePrincipalName:
+		return
+
+	try:
+		fieldName = "last_email_sync" if syncType == "email" else "last_calendar_sync"
+		frappe.db.set_value(
+			"M365 Email Service Principal Settings",
+			servicePrincipalName,
+			fieldName,
+			now_datetime()
+		)
+		frappe.db.commit()
+	except Exception as e:
+		print(f"M365 Email: Failed to update last sync time for {servicePrincipalName}: {str(e)}")
+
+
 def sync_all_email_accounts():
 	"""
-	Sync all M365 email accounts with incoming enabled
-	Scheduled to run every 5 minutes
+	Sync all M365 email accounts with incoming enabled.
+	Respects the sync interval configured on each Service Principal.
+	Scheduled to run every minute, but only syncs when interval has elapsed.
 	"""
 	print("M365 Email: Starting scheduled sync for all accounts with incoming enabled")
 
-	success_count = 0
-	failed_count = 0
+	successCount = 0
+	failedCount = 0
+	skippedCount = 0
+
+	# NOTE: Track which Service Principals we've already synced this run
+	syncedServicePrincipals = set()
 
 	# Sync Email Accounts with service='M365'
-	email_accounts = frappe.get_all(
+	emailAccounts = frappe.get_all(
 		"Email Account",
 		filters={"service": "M365", "enable_incoming": 1},
-		fields=["name", "email_account_name", "email_id"]
+		fields=["name", "email_account_name", "email_id", "m365_service_principal"]
 	)
 
-	if not email_accounts:
+	if not emailAccounts:
 		print("M365 Email: No accounts with incoming enabled found")
 		return
 
-	print(f"M365 Email: Found {len(email_accounts)} Email Account(s) with service='M365'")
+	print(f"M365 Email: Found {len(emailAccounts)} Email Account(s) with service='M365'")
 
-	for account in email_accounts:
+	for account in emailAccounts:
+		accountName = account.email_account_name or account.name
+		servicePrincipal = account.m365_service_principal
+
+		# Check if we should sync based on the Service Principal's interval
+		if servicePrincipal and servicePrincipal not in syncedServicePrincipals:
+			if not ShouldSyncServicePrincipal(servicePrincipal, "email"):
+				print(f"M365 Email: Skipping {accountName} - sync interval not elapsed")
+				skippedCount += 1
+				continue
+
 		try:
-			account_name = account.email_account_name or account.name
-			print(f"M365 Email: Syncing {account_name} ({account.email_id})")
+			print(f"M365 Email: Syncing {accountName} ({account.email_id})")
 			result = sync_email_account(account.name)
 
 			if result.get("success"):
-				success_count += 1
+				successCount += 1
 				print(
-					f"M365 Email: Successfully synced {account_name} - "
+					f"M365 Email: Successfully synced {accountName} - "
 					f"Fetched: {result.get('fetched', 0)}, "
 					f"Created: {result.get('created', 0)}, "
 					f"Updated: {result.get('updated', 0)}"
 				)
+
+				# NOTE: Mark this Service Principal as synced and update timestamp
+				if servicePrincipal:
+					syncedServicePrincipals.add(servicePrincipal)
+					UpdateServicePrincipalLastSync(servicePrincipal, "email")
 			else:
-				failed_count += 1
+				failedCount += 1
 				print(
-					f"M365 Email: Failed to sync {account_name} - "
+					f"M365 Email: Failed to sync {accountName} - "
 					f"Error: {result.get('message')}"
 				)
 		except Exception as e:
-			failed_count += 1
-			print(f"M365 Email: Exception syncing {account_name}: {str(e)}")
+			failedCount += 1
+			print(f"M365 Email: Exception syncing {accountName}: {str(e)}")
 			frappe.log_error(
 				title="M365 Email Sync Failed",
-				message=f"Account: {account_name}\nEmail: {account.email_id}\n\nError: {str(e)}"
+				message=f"Account: {accountName}\nEmail: {account.email_id}\n\nError: {str(e)}"
 			)
 
 	print(
 		f"M365 Email: Scheduled sync completed - "
-		f"Success: {success_count}, Failed: {failed_count}"
+		f"Success: {successCount}, Failed: {failedCount}, Skipped: {skippedCount}"
 	)
 
 
 def sync_all_calendar_events():
 	"""
-	Sync calendar events for all accounts with event sync enabled
-	Scheduled to run every 5 minutes
+	Sync calendar events for all accounts with event sync enabled.
+	Respects the sync interval configured on each Service Principal.
+	Scheduled to run every minute, but only syncs when interval has elapsed.
 	"""
 	print("M365 Email: Starting scheduled calendar event sync for all accounts with event sync enabled")
 
-	success_count = 0
-	failed_count = 0
+	successCount = 0
+	failedCount = 0
+	skippedCount = 0
+
+	# NOTE: Track which Service Principals we've already synced this run
+	syncedServicePrincipals = set()
 
 	# Sync Email Accounts with service='M365' and m365_sync_events enabled
-	email_accounts = frappe.get_all(
+	emailAccounts = frappe.get_all(
 		"Email Account",
 		filters={"service": "M365", "m365_sync_events": 1},
-		fields=["name", "email_account_name", "email_id"]
+		fields=["name", "email_account_name", "email_id", "m365_service_principal"]
 	)
 
-	if not email_accounts:
+	if not emailAccounts:
 		print("M365 Email: No accounts with event sync enabled found")
 		return
 
-	print(f"M365 Email: Found {len(email_accounts)} Email Account(s) with M365 event sync enabled")
+	print(f"M365 Email: Found {len(emailAccounts)} Email Account(s) with M365 event sync enabled")
 
-	for account in email_accounts:
+	for account in emailAccounts:
+		accountName = account.email_account_name or account.name
+		servicePrincipal = account.m365_service_principal
+
+		# Check if we should sync based on the Service Principal's interval
+		if servicePrincipal and servicePrincipal not in syncedServicePrincipals:
+			if not ShouldSyncServicePrincipal(servicePrincipal, "calendar"):
+				print(f"M365 Email: Skipping calendar sync for {accountName} - sync interval not elapsed")
+				skippedCount += 1
+				continue
+
 		try:
-			account_name = account.email_account_name or account.name
-			print(f"M365 Email: Syncing calendar events for {account_name} ({account.email_id})")
+			print(f"M365 Email: Syncing calendar events for {accountName} ({account.email_id})")
 			result = sync_calendar_events(account.name)
 
 			if result.get("success"):
-				success_count += 1
+				successCount += 1
 				print(
-					f"M365 Email: Successfully synced events for {account_name} - "
+					f"M365 Email: Successfully synced events for {accountName} - "
 					f"Fetched: {result.get('fetched', 0)}, "
 					f"Created: {result.get('created', 0)}, "
 					f"Updated: {result.get('updated', 0)}, "
 					f"Deleted: {result.get('deleted', 0)}, "
 					f"Skipped: {result.get('skipped', 0)}"
 				)
+
+				# NOTE: Mark this Service Principal as synced and update timestamp
+				if servicePrincipal:
+					syncedServicePrincipals.add(servicePrincipal)
+					UpdateServicePrincipalLastSync(servicePrincipal, "calendar")
 			else:
-				failed_count += 1
+				failedCount += 1
 				print(
-					f"M365 Email: Failed to sync events for {account_name} - "
+					f"M365 Email: Failed to sync events for {accountName} - "
 					f"Error: {result.get('message')}"
 				)
 		except Exception as e:
-			failed_count += 1
-			print(f"M365 Email: Exception syncing events for {account_name}: {str(e)}")
+			failedCount += 1
+			print(f"M365 Email: Exception syncing events for {accountName}: {str(e)}")
 			frappe.log_error(
 				title="M365 Event Sync Failed",
-				message=f"Account: {account_name}\nEmail: {account.email_id}\n\nError: {str(e)}"
+				message=f"Account: {accountName}\nEmail: {account.email_id}\n\nError: {str(e)}"
 			)
 
 	print(
 		f"M365 Email: Calendar event sync completed - "
-		f"Success: {success_count}, Failed: {failed_count}"
+		f"Success: {successCount}, Failed: {failedCount}, Skipped: {skippedCount}"
 	)
 
 

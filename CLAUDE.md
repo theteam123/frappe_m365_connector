@@ -79,7 +79,7 @@ pipeline for both incoming sync and outgoing send.
 ```python
 # Overrides Frappe core doctype classes
 override_doctype_class = {
-    "Email Account": "m365email.m365email.email_account_override.M365EmailAccount",
+    "Email Account": "m365email.m365email.email_account_override.ExtendedEmailAccount",
     "Email Queue": "m365email.m365email.email_queue_override.M365EmailQueue"
 }
 

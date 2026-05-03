@@ -13,9 +13,9 @@ IGNORE_TEST_RECORD_DEPENDENCIES = []  # eg. ["User"]
 
 
 
-class IntegrationTestM365EmailAccount(IntegrationTestCase):
+class IntegrationTestM365EmailSyncLog(IntegrationTestCase):
 	"""
-	Integration tests for M365EmailAccount.
+	Integration tests for M365EmailSyncLog.
 	Use this class for testing interactions between multiple components.
 	"""
 

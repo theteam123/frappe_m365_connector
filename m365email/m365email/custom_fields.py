@@ -51,6 +51,31 @@ def create_m365_custom_fields():
 		# Email Account - M365 Settings Section
 		# ============================================
 		"Email Account": [
+			# ============================================
+			# Linked User (Details Tab - Account Section)
+			# ============================================
+			{
+				"fieldname": "linked_user",
+				"label": "Linked User",
+				"fieldtype": "Link",
+				"options": "User",
+				"insert_after": "email_id",
+				"description": "The Frappe user who owns this email account. Only this user can view emails synced from this account."
+			},
+
+			# ============================================
+			# User Default (Outgoing Tab)
+			# ============================================
+			{
+				"fieldname": "user_default",
+				"label": "User Default",
+				"fieldtype": "Check",
+				"insert_after": "track_email_status",
+				"depends_on": "enable_outgoing",
+				"default": "0",
+				"description": "When checked, this email account becomes the default for sending emails when logged in as the Linked User"
+			},
+
 			# M365 Settings Section Break
 			{
 				"fieldname": "m365_settings_section",
@@ -260,11 +285,22 @@ def create_m365_custom_fields():
 				"fieldname": "m365_email_account",
 				"label": "M365 Email Account",
 				"fieldtype": "Link",
-				"options": "Email Account",  # Changed from M365 Email Account
+				"options": "Email Account",
 				"insert_after": "m365_message_id",
 				"read_only": 1,
 				"no_copy": 1,
 				"hidden": 1
+			},
+			{
+				"fieldname": "linked_user",
+				"label": "Linked User",
+				"fieldtype": "Link",
+				"options": "User",
+				"insert_after": "m365_email_account",
+				"read_only": 1,
+				"no_copy": 1,
+				"hidden": 1,
+				"description": "User who owns this email for privacy filtering"
 			}
 		],
 

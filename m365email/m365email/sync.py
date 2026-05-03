@@ -326,6 +326,12 @@ def create_communication_from_message_for_email_account(message, email_account, 
 			comm.reference_doctype = reference_doctype
 			comm.reference_name = reference_name
 
+		# NOTE: Set owner and linked_user for access control
+		linkedUser = getattr(email_account, 'linked_user', None)
+		if linkedUser:
+			comm.owner = linkedUser
+			comm.linked_user = linkedUser
+
 		comm.insert(ignore_permissions=True)
 
 		# Handle attachments if enabled

@@ -1,7 +1,7 @@
 // Copyright (c) 2026, TierneyMorris Pty Ltd and contributors
 // For license information, please see license.txt
 
-// frappe.ui.form.on("M365 Email Account", {
+// frappe.ui.form.on("M365 Email Sync Log", {
 // 	refresh(frm) {
 
 // 	},
