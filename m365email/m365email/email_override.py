@@ -63,7 +63,15 @@ def make(
 		)
 
 	if doctype and name and not frappe.has_permission(doctype=doctype, ptype="email", doc=name):
-		raise frappe.PermissionError(f"You are not allowed to send emails related to: {doctype} {name}")
+		frappe.throw(
+			_(
+				"You are not allowed to send emails related to {0} {1}. "
+				"Your account is missing the 'Email' permission on {0} — "
+				"ask your administrator to grant it on a role you hold."
+			).format(doctype, name),
+			frappe.PermissionError,
+			title=_("Email Permission Required"),
+		)
 
 	return _make(
 		doctype=doctype,
