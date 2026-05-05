@@ -1,38 +1,6 @@
 ---
 name: ui-branding-reviewer
-description: Use this agent after ANY frontend change — new pages, modified forms, restyled components, dashboard tweaks, modal changes, Vue/JS/SCSS/CSS edits — to verify the change adheres to the Team Group brand system in `tg_custom`. Confirms brand-colour usage, form-field consistency (uniform width/height/labels/spacing), spacing rhythm, alignment, accessibility, and microcopy. Invoke BEFORE declaring a UI task complete. Equivalent to coding-standards-enforcer but for visual/UX correctness.
-
-Examples:
-
-<example>
-Context: The user asked for a new "Add Customer" form on the projects page.
-user: "Add a form to create a new customer with name, email, phone, and address fields"
-assistant: "I've added the form to the projects page."
-assistant: "Now let me run the ui-branding-reviewer agent to verify the form adheres to the TG brand system."
-<commentary>
-After building any form, launch the ui-branding-reviewer to verify field widths align, all inputs use the same height, brand colours come from --tg-* CSS variables, and labels follow the system pattern.
-</commentary>
-</example>
-
-<example>
-Context: The user requested a redesign of the Schedule dashboard cards.
-user: "Make the schedule cards look cleaner and more modern"
-assistant: "I've updated the card styling with new padding, border-radius, and a subtle shadow."
-assistant: "I'll invoke the ui-branding-reviewer agent to confirm the changes use TG tokens and not hard-coded values."
-<commentary>
-After visual restyling, the reviewer must verify radius/shadow/spacing values come from --tg-radius-*, --tg-shadow-*, --tg-space-*, not arbitrary pixels.
-</commentary>
-</example>
-
-<example>
-Context: The user added status badges to the project list.
-user: "Add coloured status badges next to each project name"
-assistant: "I've added badges using the .tg-badge classes."
-assistant: "Let me run the ui-branding-reviewer agent to confirm the badge variants and colours are on-brand."
-<commentary>
-Custom colours are a high-risk area — the reviewer must confirm only documented .tg-badge-* variants and --tg-success/warning/error tokens are used, not freehand hex.
-</commentary>
-</example>
+description: Reviews frontend changes against the Team Group brand system in `tg_custom` — brand-colour token usage, form-field consistency (uniform width/height/labels/spacing), typography scale, spacing rhythm, alignment, accessibility (WCAG 2.2 AA), four-state coverage (empty/loading/error/success), microcopy. Invocation is USER-GATED, never auto-run. At the planning stage of any task involving frontend/design (CSS/SCSS/Vue/JSX/HTML/page JS, form, component, dashboard, modal, badge, button, colour, spacing, typography, layout), present an AskUserQuestion asking whether to invoke this agent. Suggested options:\n  • Yes — review after implementation (invoke once code is written, before declaring complete)\n  • Yes — review the plan first (invoke against the planned approach before coding)\n  • No — skip the review\nHonour the user's answer for the rest of that task.
 model: sonnet
 color: pink
 ---
