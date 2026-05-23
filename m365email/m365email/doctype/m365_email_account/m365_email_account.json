@@ -1,5 +1,6 @@
 {
  "actions": [],
+ "allow_events_in_timeline": 1,
  "allow_import": 1,
  "allow_rename": 1,
  "autoname": "field:account_name",
@@ -205,7 +206,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-01-18 20:35:23.352492",
+ "modified": "2026-05-23 11:09:31.052883",
  "modified_by": "Administrator",
  "module": "M365Email",
  "name": "M365 Email Account",
