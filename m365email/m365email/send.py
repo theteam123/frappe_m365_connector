@@ -74,11 +74,12 @@ def auto_provision_m365_account(sender_email):
 			"email_account_name": f"{user_full_name} ({sender_email})",
 			"service": "M365",
 			"email_id": sender_email,
+			"linked_user": user,
 			"m365_account_type": "User Mailbox",
 			"m365_service_principal": sp_doc.name,
-			"enable_incoming": 0,  # Only enable outgoing by default
+			"enable_incoming": 0,
 			"enable_outgoing": 1,
-			"default_outgoing": 0,
+			"default_outgoing": 1,
 			"signature": signature
 		})
 
@@ -97,14 +98,64 @@ def auto_provision_m365_account(sender_email):
 		return None
 
 
+def GetUserDefaultEmailAccount(user: str = None):
+	"""
+	Get the user's default email account for sending.
+
+	Finds an M365 Email Account linked to the user with default_outgoing enabled.
+
+	Args:
+		user: User ID. Defaults to current session user.
+
+	Returns:
+		Email Account doc if found, None otherwise
+	"""
+	if not user:
+		user = frappe.session.user
+
+	if not user or user == "Guest":
+		return None
+
+	# NOTE: Find email account linked to this user with user_default checked
+	accountName = frappe.db.get_value(
+		"Email Account",
+		{
+			"linked_user": user,
+			"user_default": 1,
+			"enable_outgoing": 1
+		},
+		"name"
+	)
+
+	if accountName:
+		return frappe.get_doc("Email Account", accountName)
+
+	# NOTE: Fall back to any account linked to the user with outgoing enabled
+	accountName = frappe.db.get_value(
+		"Email Account",
+		{
+			"linked_user": user,
+			"enable_outgoing": 1
+		},
+		"name"
+	)
+
+	if accountName:
+		return frappe.get_doc("Email Account", accountName)
+
+	return None
+
+
+
 def get_sending_account_for_sender(sender_email):
 	"""
 	Get the Email Account for a specific sender email.
 
 	Checks in order:
-	1. Email Account with service='M365' matching sender
-	2. Auto-provision if eligible
-	3. Default M365 outgoing account
+	1. User's linked email account (via linked_user field)
+	2. Email Account with service='M365' matching sender email
+	3. Auto-provision if eligible
+	4. Default M365 outgoing account
 
 	Args:
 		sender_email: Email address of the sender
@@ -119,6 +170,11 @@ def get_sending_account_for_sender(sender_email):
 	# Parse email address from "Name <email>" format
 	if sender_email:
 		_, sender_email = parseaddr(sender_email)
+
+	# NOTE: First check for user's linked email account
+	userLinkedAccount = GetUserDefaultEmailAccount()
+	if userLinkedAccount and userLinkedAccount.service == "M365":
+		return userLinkedAccount, True
 
 	# Try to find an Email Account with service='M365' matching the sender
 	if sender_email and '@' in sender_email:

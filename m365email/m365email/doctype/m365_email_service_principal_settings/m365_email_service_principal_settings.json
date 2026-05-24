@@ -17,6 +17,12 @@
   "graph_api_endpoint",
   "scopes",
   "enabled",
+  "section_break_sync_settings",
+  "email_sync_interval_minutes",
+  "last_email_sync",
+  "column_break_sync_settings",
+  "calendar_sync_interval_minutes",
+  "last_calendar_sync",
   "section_break_auto_provision",
   "enable_auto_provision",
   "domain",
@@ -65,7 +71,7 @@
    "fieldtype": "Column Break"
   },
   {
-   "default": "https://login.microsoftonline.com/{tenant_id}",
+   "description": "Auto-populated from Tenant ID",
    "fieldname": "authority_url",
    "fieldtype": "Data",
    "label": "Authority URL"
@@ -87,6 +93,41 @@
    "fieldname": "enabled",
    "fieldtype": "Check",
    "label": "Enabled"
+  },
+  {
+   "fieldname": "section_break_sync_settings",
+   "fieldtype": "Section Break",
+   "label": "Sync Settings"
+  },
+  {
+   "default": "5",
+   "description": "How often to sync incoming emails (in minutes). Minimum 1 minute.",
+   "fieldname": "email_sync_interval_minutes",
+   "fieldtype": "Int",
+   "label": "Email Sync Interval (minutes)"
+  },
+  {
+   "fieldname": "last_email_sync",
+   "fieldtype": "Datetime",
+   "label": "Last Email Sync",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_sync_settings",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "5",
+   "description": "How often to sync calendar events (in minutes). Minimum 1 minute.",
+   "fieldname": "calendar_sync_interval_minutes",
+   "fieldtype": "Int",
+   "label": "Calendar Sync Interval (minutes)"
+  },
+  {
+   "fieldname": "last_calendar_sync",
+   "fieldtype": "Datetime",
+   "label": "Last Calendar Sync",
+   "read_only": 1
   },
   {
    "collapsible": 1,

@@ -10,9 +10,10 @@ class M365EmailServicePrincipalSettings(Document):
 	
 	def validate(self):
 		"""Validate service principal settings"""
-		# Set default authority URL if not provided
-		if not self.authority_url and self.tenant_id:
-			self.authority_url = f"https://login.microsoftonline.com/{self.tenant_id}"
+		# NOTE: Fix authority URL if it contains placeholder or is missing
+		if self.tenant_id:
+			if not self.authority_url or "{tenant_id}" in self.authority_url:
+				self.authority_url = f"https://login.microsoftonline.com/{self.tenant_id}"
 		
 		# Set default Graph API endpoint if not provided
 		if not self.graph_api_endpoint:

@@ -2,14 +2,25 @@
 # For license information, please see license.txt
 
 """
-Email Account doctype override for M365 integration.
+Email Account doctype override.
 
-This module extends the standard Email Account class to support M365
-service type, handling:
+NOTE: This override is registered globally via `override_doctype_class` in
+hooks.py and therefore applies to ALL Email Accounts — Gmail, generic IMAP,
+POP3, and M365 alike — not just M365 accounts. M365-specific behaviour is
+dispatched only when `self.service == "M365"`; for every other service, each
+overridden method delegates to the base `EmailAccount` via `super()`.
+
+This means tracebacks from non-M365 accounts (e.g. Gmail OAuth refresh
+failures) will reference this file and the `ExtendedEmailAccount` class. That
+is expected — it does not indicate an M365 problem. The actual provider can
+be identified from `self.service` and `self.email_id` in the traceback locals.
+
+Responsibilities:
 - M365-specific validation (skip SMTP/IMAP validation)
-- Email receiving via Graph API delta sync
-- Access token management through service principal
+- Email receiving via Graph API delta sync (M365 only)
+- Access token management through service principal (M365 only)
 - Override of find_outgoing to include M365 accounts
+- Linked-user validation (applies to all services)
 """
 
 import frappe
@@ -18,14 +29,22 @@ from frappe.email.doctype.email_account.email_account import EmailAccount
 from frappe.utils import now_datetime
 
 
-class M365EmailAccount(EmailAccount):
+class ExtendedEmailAccount(EmailAccount):
 	"""
-	Extended Email Account class with M365 support.
-	
-	When service='M365', this class:
-	- Skips SMTP/IMAP validation
-	- Uses Graph API for receiving emails
-	- Gets access tokens from linked service principal
+	Override class for the standard Email Account doctype.
+
+	NOTE: Registered as the global `override_doctype_class` for "Email Account"
+	in hooks.py — this class wraps EVERY Email Account regardless of service,
+	not just M365 ones. Methods dispatch on `self.service`:
+
+	- When `service == "M365"`: skip SMTP/IMAP validation, use Graph API for
+	  receiving, and resolve access tokens via the linked service principal.
+	- For all other services (Gmail, generic IMAP, POP3, etc.): delegate to
+	  the base `EmailAccount` implementation via `super()`.
+
+	The class name was previously `M365EmailAccount`, which misled readers into
+	attributing non-M365 errors to M365. Renamed to `ExtendedEmailAccount` to
+	reflect the actual scope.
 	"""
 	
 	def validate(self):
@@ -36,9 +55,12 @@ class M365EmailAccount(EmailAccount):
 		if self.service == "M365":
 			self._validate_m365()
 		else:
-			# Use standard validation for non-M365 accounts
+			# NOTE: Use standard validation for non-M365 accounts
 			super().validate()
-	
+
+		# NOTE: Validate linked user for all account types
+		self._validateLinkedUser()
+
 	def _validate_m365(self):
 		"""Validate M365-specific fields."""
 		from frappe.utils import validate_email_address
@@ -88,7 +110,47 @@ class M365EmailAccount(EmailAccount):
 		if self.notify_if_unreplied:
 			if not self.send_notification_to:
 				frappe.throw(_("{0} is mandatory").format(self.meta.get_label("send_notification_to")))
-	
+
+
+	def _validateLinkedUser(self):
+		"""
+		Validate linked user settings.
+		Ensures only one email account can be the user default for a given linked user.
+		"""
+		linkedUser = getattr(self, 'linked_user', None)
+
+		if not linkedUser:
+			return
+
+		# NOTE: Validate that the linked user exists
+		if not frappe.db.exists("User", linkedUser):
+			frappe.throw(_("Linked User '{0}' does not exist").format(linkedUser))
+
+		# NOTE: If user_default is checked, ensure no other account is user default for this user
+		isUserDefault = getattr(self, 'user_default', 0)
+		if not isUserDefault:
+			return
+
+		existingDefault = frappe.db.get_value(
+			"Email Account",
+			{
+				"name": ["!=", self.name],
+				"linked_user": linkedUser,
+				"user_default": 1,
+				"enable_outgoing": 1
+			},
+			"name"
+		)
+
+		if existingDefault:
+			frappe.throw(
+				_("Email Account '{0}' is already set as the User Default for '{1}'. "
+				  "Please uncheck User Default on that account first.").format(
+					existingDefault, linkedUser
+				)
+			)
+
+
 	def get_incoming_server(self, in_receive=False, email_sync_rule="UNSEEN"):
 		"""
 		Get incoming server connection.
@@ -202,13 +264,12 @@ class M365EmailAccount(EmailAccount):
 			)
 
 	@classmethod
-	def find_m365_account_for_user(cls, user=None):
+	def find_m365_account_for_user(cls, user: str = None):
 		"""
-		Find an M365 Email Account for the given user.
-		Checks user's own mailbox first, then shared mailboxes via User Email table.
+		Find an M365 Email Account linked to the given user.
 
 		Args:
-			user: User email or name. Defaults to current user.
+			user: User ID. Defaults to current session user.
 
 		Returns:
 			Email Account doc or None
@@ -216,44 +277,37 @@ class M365EmailAccount(EmailAccount):
 		if not user:
 			user = frappe.session.user
 
-		# Get user's email
-		user_email = frappe.db.get_value("User", user, "email")
+		if not user or user == "Guest":
+			return None
 
-		# First, try to find user's own M365 mailbox
+		# NOTE: Find email account linked to this user (prefer default_outgoing)
 		account = frappe.db.get_value(
 			"Email Account",
 			{
 				"service": "M365",
-				"enable_outgoing": 1,
-				"email_id": user_email
+				"linked_user": user,
+				"default_outgoing": 1,
+				"enable_outgoing": 1
 			},
 			"name"
 		)
+
 		if account:
 			return frappe.get_doc("Email Account", account)
 
-		# Next, check shared mailboxes via User Email table
-		# Frappe's standard approach - users are linked to email accounts via User Email child table
-		user_email_accounts = frappe.get_all(
-			"User Email",
-			filters={"parent": user, "enable_outgoing": 1},
-			fields=["email_account"],
-			order_by="idx"
+		# NOTE: Fall back to any M365 account linked to user
+		account = frappe.db.get_value(
+			"Email Account",
+			{
+				"service": "M365",
+				"linked_user": user,
+				"enable_outgoing": 1
+			},
+			"name"
 		)
 
-		for ue in user_email_accounts:
-			# Check if this is an M365 account
-			account_data = frappe.db.get_value(
-				"Email Account",
-				{
-					"name": ue.email_account,
-					"service": "M365",
-					"enable_outgoing": 1
-				},
-				"name"
-			)
-			if account_data:
-				return frappe.get_doc("Email Account", account_data)
+		if account:
+			return frappe.get_doc("Email Account", account)
 
 		return None
 

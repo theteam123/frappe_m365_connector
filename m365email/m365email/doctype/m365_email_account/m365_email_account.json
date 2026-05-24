@@ -1,7 +1,5 @@
 {
  "actions": [],
- "allow_events_in_timeline": 1,
- "allow_import": 1,
  "allow_rename": 1,
  "autoname": "field:account_name",
  "creation": "2025-01-24 12:00:00",
@@ -9,10 +7,11 @@
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
-  "user",
-  "account_type",
+  "not_used",
   "account_name",
+  "account_type",
   "email_address",
+  "user",
   "role",
   "service_principal",
   "enable_incoming",
@@ -37,7 +36,6 @@
  ],
  "fields": [
   {
-   "fetch_from": "user.full_name",
    "fieldname": "account_name",
    "fieldtype": "Data",
    "in_list_view": 1,
@@ -55,7 +53,6 @@
    "reqd": 1
   },
   {
-   "fetch_from": "user.email",
    "fieldname": "email_address",
    "fieldtype": "Data",
    "in_list_view": 1,
@@ -67,7 +64,6 @@
    "fieldtype": "Link",
    "in_list_view": 1,
    "label": "User",
-   "link_filters": "[[\"User\",\"role\",\"=\",\"Projects User\"]]",
    "options": "User",
    "reqd": 1
   },
@@ -79,7 +75,6 @@
    "options": "Role"
   },
   {
-   "default": "SGC Australia",
    "fieldname": "service_principal",
    "fieldtype": "Link",
    "label": "Service Principal",
@@ -202,11 +197,16 @@
    "fieldtype": "Long Text",
    "label": "Delta Tokens (JSON)",
    "read_only": 1
+  },
+  {
+   "fieldname": "not_used",
+   "fieldtype": "HTML",
+   "options": "<div style=\"background:#fee2e2; border:2px solid #b91c1c; padding:16px; border-radius:8px; color:#7f1d1d;\">\n  <div style=\"font-size:22px; font-weight:800; margin-bottom:8px;\">\n    \u26a0\ufe0f M365 EMAIL ACCOUNT \u2013 DO NOT USE\n  </div>\n  <div style=\"font-size:16px; font-weight:600; line-height:1.5;\">\n    The M365 Email Account page is no longer used in the 365 app.<br>\n    This DocType exists for backwards compatibility only.<br><br>\n    All Microsoft 365 email accounts must be configured under:<br>\n    <a href=\"https://staging.theteam.net.au/app/email-account\" target=\"_blank\" style=\"color:#991b1b; font-weight:700; text-decoration:underline;\">\n      Email Account\n    </a>\n  </div>\n</div>"
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-05-23 11:09:31.052883",
+ "modified": "2026-02-16 16:49:31.491749",
  "modified_by": "Administrator",
  "module": "M365Email",
  "name": "M365 Email Account",
@@ -228,19 +228,6 @@
   {
    "read": 1,
    "role": "M365 User",
-   "write": 1
-  },
-  {
-   "create": 1,
-   "delete": 1,
-   "email": 1,
-   "export": 1,
-   "if_owner": 1,
-   "print": 1,
-   "read": 1,
-   "report": 1,
-   "role": "All",
-   "share": 1,
    "write": 1
   }
  ],
