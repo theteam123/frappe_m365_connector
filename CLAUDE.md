@@ -2,11 +2,12 @@
 
 ## Master Coding Standards
 
-**All code in this repo MUST follow the master standards at:**
-https://github.com/theteam123/virtual_dev_server/blob/main/CLAUDE.md
+**All code MUST follow the SGC bench-wide standards (single source of truth):**
+- `/home/frappe/frappe-bench/claude-config-docs/CodingStandards.md`
+- `/home/frappe/frappe-bench/claude-config-docs/security-rules.md` (SEC-001…005)
 
-Read it completely before writing any code. The rules below are
-repo-specific additions — they do not override the master.
+Read them before writing any code. The rules below are app-specific
+additions — they do not override the standards repo.
 
 ---
 
