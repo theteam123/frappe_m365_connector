@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>Send to ERP</title>
+	<script src="https://appsforoffice.microsoft.com/lib/1.1/hosted/office.js"></script>
+	<link rel="stylesheet" href="taskpane.css" />
+</head>
+<body>
+	<main id="app">
+		<!-- Sign-in view -->
+		<section id="loginView" class="view hidden">
+			<h1>Sign in to ERP</h1>
+			<p class="muted">Sign in once to file emails into ERP.</p>
+			<label for="usr">Email</label>
+			<input id="usr" type="email" autocomplete="username" />
+			<label for="pwd">Password</label>
+			<input id="pwd" type="password" autocomplete="current-password" />
+			<button id="loginBtn" class="primary">Sign in</button>
+			<p id="loginError" class="error"></p>
+		</section>
+
+		<!-- Filing view -->
+		<section id="fileView" class="view hidden">
+			<header class="topbar">
+				<span id="whoami" class="muted"></span>
+			</header>
+
+			<h1>Send to ERP</h1>
+
+			<fieldset>
+				<legend>What to file</legend>
+				<label class="check"><input id="saveEmail" type="checkbox" checked /> The email itself</label>
+				<div id="attachmentList" class="attachments"></div>
+				<p id="noAttachments" class="muted hidden">No file attachments on this email.</p>
+			</fieldset>
+
+			<fieldset>
+				<legend>Where to file it</legend>
+				<label for="doctype">Type</label>
+				<select id="doctype"></select>
+				<label for="search">Find record</label>
+				<input id="search" type="text" placeholder="Start typing…" autocomplete="off" />
+				<ul id="results" class="results"></ul>
+				<p id="chosen" class="chosen hidden"></p>
+			</fieldset>
+
+			<button id="fileBtn" class="primary" disabled>Attach to ERP</button>
+			<p id="status" class="status"></p>
+		</section>
+	</main>
+
+	<script src="taskpane.js"></script>
+</body>
+</html>
