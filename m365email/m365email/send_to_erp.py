@@ -223,10 +223,14 @@ def _GetTitleField(doctype: str) -> Optional[str]:
 
 
 def _FormatSearchRow(row: dict, titleField: Optional[str]) -> dict:
-	"""Format one search result as {value, label} for the picker."""
+	"""Format one search result as {value, label} for the picker.
+
+	The label shows the human-readable title (e.g. project number/name) and
+	never the raw record id, which for several doctypes is an opaque UUID.
+	"""
 	name = row.get("name")
 	title = row.get(titleField) if titleField else None
-	label = f"{name} — {title}" if title and title != name else name
+	label = title if title else name
 	return {"value": name, "label": label}
 
 
@@ -284,10 +288,34 @@ def _CreateCommunication(
 		"recipients": recipients or "",
 		"reference_doctype": target_doctype,
 		"reference_name": target_name,
-		"communication_date": sent_date or frappe.utils.now_datetime(),
+		"communication_date": _ParseEmailDate(sent_date),
 	})
 	communication.insert()
 	return communication.name
+
+
+
+def _ParseEmailDate(value: Optional[str]):
+	"""Convert an email ISO timestamp to a system-timezone datetime.
+
+	Outlook sends an ISO 8601 UTC string like ``2026-06-17T11:18:54.000Z``,
+	which the database cannot store directly. Parse it, convert UTC to the
+	site timezone, and fall back to now if it cannot be parsed.
+	"""
+	if not value:
+		return frappe.utils.now_datetime()
+
+	import datetime as dtmod
+	try:
+		parsed = dtmod.datetime.fromisoformat(value.replace("Z", "+00:00"))
+	except (ValueError, TypeError):
+		return frappe.utils.now_datetime()
+
+	if parsed.tzinfo is None:
+		return parsed
+
+	utcNaive = parsed.astimezone(dtmod.timezone.utc).replace(tzinfo=None)
+	return frappe.utils.convert_utc_to_system_timezone(utcNaive).replace(tzinfo=None)
 
 
 
