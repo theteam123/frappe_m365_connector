@@ -84,6 +84,12 @@ def SearchTargets(target_doctype: Optional[str] = None, txt: str = "") -> list[d
 	Returns:
 		List of {value, label} matches, capped at MAX_SEARCH_RESULTS.
 	"""
+	try:
+		with open("/tmp/sterp_debug.log", "a") as fh:
+			fh.write(f"{frappe.utils.now()} SEARCH-ENTRY user={frappe.session.user} target_doctype={target_doctype!r} fd_keys={list(frappe.form_dict.keys())}\n")
+	except Exception:
+		pass
+
 	doctype = target_doctype or frappe.form_dict.get("doctype")
 	if not doctype:
 		frappe.throw(_("No target type was provided."))
