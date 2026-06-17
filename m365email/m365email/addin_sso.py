@@ -43,7 +43,7 @@ def ValidateAddinToken() -> None:
 	if not token:
 		return
 
-	_debug(f"path={frappe.request.path if frappe.request else '?'} bearer_present=yes")
+	_debug(f"path={frappe.request.path if frappe.request else '?'} qs={frappe.request.query_string if frappe.request else b''} bearer_present=yes")
 
 	apps = _GetConfiguredApps()
 	if not apps:
