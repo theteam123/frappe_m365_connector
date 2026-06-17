@@ -290,7 +290,9 @@ def _CreateCommunication(
 		"reference_name": target_name,
 		"communication_date": _ParseEmailDate(sent_date),
 	})
-	communication.insert()
+	# Authorization is enforced upstream via write permission on the target
+	# record; the linked Communication is created on the user's behalf.
+	communication.insert(ignore_permissions=True)
 	return communication.name
 
 
@@ -345,7 +347,7 @@ def _AttachFiles(attachmentList: list[dict], parentDoctype: str, parentName: str
 			"is_private": 1,
 			"content": base64.b64decode(content),
 		})
-		fileDoc.insert()
+		fileDoc.insert(ignore_permissions=True)
 		created.append({"file_name": fileDoc.file_name, "file_url": fileDoc.file_url})
 
 	return created
