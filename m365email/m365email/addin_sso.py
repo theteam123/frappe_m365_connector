@@ -104,14 +104,19 @@ def _ValidateToken(token: str, apps: list[dict]) -> Optional[dict]:
 	"""
 	unverified = _DecodeUnverified(token)
 	if not unverified:
+		_debug("could not decode token")
 		return None
+
+	_debug(f"unverified iss={unverified.get('iss')} aud={unverified.get('aud')} exp={unverified.get('exp')}")
 
 	tenantId = _MatchTenant(unverified.get("iss", ""), apps)
 	if not tenantId:
+		_debug("tenant did not match configured apps")
 		return None
 
 	signingKey = _GetSigningKey(tenantId, token)
 	if not signingKey:
+		_debug("could not fetch signing key")
 		return None
 
 	try:
@@ -121,10 +126,12 @@ def _ValidateToken(token: str, apps: list[dict]) -> Optional[dict]:
 			algorithms=ACCEPTED_ALGORITHMS,
 			options={"verify_aud": False, "require": ["exp", "iss"]},
 		)
-	except jwt.InvalidTokenError:
+	except jwt.InvalidTokenError as e:
+		_debug(f"jwt.decode error: {type(e).__name__}: {e}")
 		return None
 
 	if not _IsAcceptedAudience(claims.get("aud", ""), apps):
+		_debug(f"audience not accepted: {claims.get('aud')}")
 		return None
 
 	return claims
