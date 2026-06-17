@@ -72,21 +72,21 @@ def GetPickableDoctypes() -> list[dict]:
 
 
 @frappe.whitelist()
-def SearchTargets(doctype: str, txt: str = "") -> list[dict]:
+def SearchTargets(target_doctype: Optional[str] = None, txt: str = "") -> list[dict]:
 	"""Search records of a doctype for the add-in's record picker.
 
 	Args:
-		doctype: Target doctype — must be in the pickable allow-list.
+		target_doctype: Target doctype — must be in the pickable allow-list.
+			(``doctype`` is a Frappe-reserved request key, so it is read from the
+			raw form_dict as a fallback for backward compatibility.)
 		txt: Partial text to match against name or the doctype's title field.
 
 	Returns:
 		List of {value, label} matches, capped at MAX_SEARCH_RESULTS.
 	"""
-	try:
-		with open("/tmp/sterp_debug.log", "a") as fh:
-			fh.write(f"{frappe.utils.now()} SEARCH-ENTRY user={frappe.session.user} doctype={doctype!r} txt={txt!r}\n")
-	except Exception:
-		pass
+	doctype = target_doctype or frappe.form_dict.get("doctype")
+	if not doctype:
+		frappe.throw(_("No target type was provided."))
 
 	_GuardPickableDoctype(doctype)
 

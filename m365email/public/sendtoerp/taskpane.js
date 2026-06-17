@@ -205,7 +205,7 @@ async function runSearch(txt) {
 	const doctype = $("doctype").value;
 	setResultsMessage("Searching…");
 	try {
-		const rows = await apiGet("SearchTargets", { doctype, txt });
+		const rows = await apiGet("SearchTargets", { target_doctype: doctype, txt });
 		const list = $("results");
 		list.innerHTML = "";
 		if (!rows || !rows.length) {
