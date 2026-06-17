@@ -25,6 +25,15 @@ USER_EMAIL_CLAIMS = ("preferred_username", "upn", "email", "unique_name")
 
 
 
+def _debug(msg: str) -> None:
+	"""Temporary diagnostic logging to /tmp (staging only)."""
+	try:
+		with open("/tmp/sterp_debug.log", "a") as fh:
+			fh.write(f"{frappe.utils.now()} AUTH {msg}\n")
+	except Exception:
+		pass
+
+
 def ValidateAddinToken() -> None:
 	"""Auth hook: authenticate a request bearing an Azure AD add-in token."""
 	if frappe.local.login_manager.user not in ("", "Guest", None):
@@ -34,20 +43,26 @@ def ValidateAddinToken() -> None:
 	if not token:
 		return
 
+	_debug(f"path={frappe.request.path if frappe.request else '?'} bearer_present=yes")
+
 	apps = _GetConfiguredApps()
 	if not apps:
+		_debug("no configured apps")
 		return
 
 	claims = _ValidateToken(token, apps)
 	if not claims:
+		_debug("token validation FAILED")
 		return
 
 	user = _ResolveUser(claims)
 	if not user:
+		_debug(f"no user for claims aud={claims.get('aud')} email={claims.get('preferred_username') or claims.get('email')}")
 		return
 
 	frappe.set_user(user)
 	frappe.local.login_manager.user = user
+	_debug(f"authenticated as {user}")
 
 
 

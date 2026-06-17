@@ -107,7 +107,13 @@ def SearchTargets(doctype: str, txt: str = "") -> list[dict]:
 		order_by="modified desc",
 	)
 
-	return [_FormatSearchRow(row, titleField) for row in records]
+	result = [_FormatSearchRow(row, titleField) for row in records]
+	try:
+		with open("/tmp/sterp_debug.log", "a") as fh:
+			fh.write(f"{frappe.utils.now()} SEARCH user={frappe.session.user} doctype={doctype} txt={txt!r} count={len(result)}\n")
+	except Exception:
+		pass
+	return result
 
 
 
