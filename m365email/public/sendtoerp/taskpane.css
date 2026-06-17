@@ -63,6 +63,8 @@ legend { font-weight: 600; padding: 0 4px; }
 .results li:first-child { border-top: 1px solid var(--border); border-radius: 6px 6px 0 0; }
 .results li:last-child { border-radius: 0 0 6px 6px; }
 .results li:hover { background: #eff6ff; }
+.results li.result-message { color: var(--muted); cursor: default; }
+.results li.result-message:hover { background: transparent; }
 
 .chosen { margin-top: 8px; padding: 7px 8px; background: #ecfdf5; border-radius: 6px; }
 

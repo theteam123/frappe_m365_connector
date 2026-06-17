@@ -143,7 +143,7 @@ def _GetSigningKey(tenantId: str, token: str):
 	"""Return the RSA signing key for the token from the tenant's JWKS endpoint."""
 	client = JWKS_CLIENT_CACHE.get(tenantId)
 	if client is None:
-		client = PyJWKClient(JWKS_URI_TEMPLATE.format(tenant=tenantId))
+		client = PyJWKClient(JWKS_URI_TEMPLATE.format(tenant=tenantId), cache_keys=True)
 		JWKS_CLIENT_CACHE[tenantId] = client
 
 	try:

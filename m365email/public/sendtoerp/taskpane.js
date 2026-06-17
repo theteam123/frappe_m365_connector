@@ -191,17 +191,36 @@ function onSearchInput() {
 }
 
 
-async function runSearch(txt) {
-	const doctype = $("doctype").value;
-	const rows = await apiGet("SearchTargets", { doctype, txt });
+function setResultsMessage(message) {
 	const list = $("results");
 	list.innerHTML = "";
-	(rows || []).forEach(row => {
-		const li = document.createElement("li");
-		li.textContent = row.label;
-		li.addEventListener("click", () => chooseTarget(doctype, row));
-		list.appendChild(li);
-	});
+	const li = document.createElement("li");
+	li.textContent = message;
+	li.className = "result-message";
+	list.appendChild(li);
+}
+
+
+async function runSearch(txt) {
+	const doctype = $("doctype").value;
+	setResultsMessage("Searching…");
+	try {
+		const rows = await apiGet("SearchTargets", { doctype, txt });
+		const list = $("results");
+		list.innerHTML = "";
+		if (!rows || !rows.length) {
+			setResultsMessage("No matches found.");
+			return;
+		}
+		rows.forEach(row => {
+			const li = document.createElement("li");
+			li.textContent = row.label;
+			li.addEventListener("click", () => chooseTarget(doctype, row));
+			list.appendChild(li);
+		});
+	} catch (e) {
+		setResultsMessage("Search error: " + (e.message || e));
+	}
 }
 
 
