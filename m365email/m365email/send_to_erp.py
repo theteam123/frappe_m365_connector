@@ -82,6 +82,12 @@ def SearchTargets(doctype: str, txt: str = "") -> list[dict]:
 	Returns:
 		List of {value, label} matches, capped at MAX_SEARCH_RESULTS.
 	"""
+	try:
+		with open("/tmp/sterp_debug.log", "a") as fh:
+			fh.write(f"{frappe.utils.now()} SEARCH-ENTRY user={frappe.session.user} doctype={doctype!r} txt={txt!r}\n")
+	except Exception:
+		pass
+
 	_GuardPickableDoctype(doctype)
 
 	if not frappe.has_permission(doctype, "read"):
