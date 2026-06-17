@@ -9,15 +9,11 @@
 </head>
 <body>
 	<main id="app">
-		<!-- Sign-in view -->
+		<!-- Sign-in view (Microsoft 365) -->
 		<section id="loginView" class="view hidden">
-			<h1>Sign in to ERP</h1>
-			<p class="muted">Sign in once to file emails into ERP.</p>
-			<label for="usr">Email</label>
-			<input id="usr" type="email" autocomplete="username" />
-			<label for="pwd">Password</label>
-			<input id="pwd" type="password" autocomplete="current-password" />
-			<button id="loginBtn" class="primary">Sign in</button>
+			<h1>Send to ERP</h1>
+			<p id="loginStatus" class="muted">Signing in with Microsoft 365…</p>
+			<button id="loginBtn" class="primary hidden">Sign in with Microsoft 365</button>
 			<p id="loginError" class="error"></p>
 		</section>
 

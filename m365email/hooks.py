@@ -200,6 +200,11 @@ scheduler_events = {
 override_whitelisted_methods = {
 	"frappe.core.doctype.communication.email.make": "m365email.m365email.email_override.make"
 }
+
+# Authenticate requests bearing a Microsoft 365 token (Send-to-ERP Outlook add-in)
+auth_hooks = [
+	"m365email.m365email.addin_sso.ValidateAddinToken"
+]
 #
 # each overriding function accepts a `data` argument;
 # generated from the base implementation of the doctype dashboard,

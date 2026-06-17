@@ -16,43 +16,34 @@ const SEARCH_DEBOUNCE_MS = 250;
 const MIN_SEARCH_CHARS = 1;
 
 const state = {
-	csrfToken: null,
+	msToken: null,     // Microsoft 365 access token (Office SSO)
 	attachments: [],   // {id, name, selected}
 	target: null,      // {doctype, value, label}
 };
 
 
+// Microsoft 365 sign-on via Office SSO. The token is sent to ERP as a bearer
+// token; ERP validates it and maps the Microsoft identity to a Frappe user.
 const auth = {
-	async loadSession() {
-		const resp = await fetch(`${API_BASE}GetSession`, { credentials: "include" });
-		if (!resp.ok) return null;
-		const data = (await resp.json()).message;
-		if (!data || data.user === "Guest") return null;
-		state.csrfToken = data.csrf_token;
-		return data.user;
-	},
-
-	async login(usr, pwd) {
-		const body = new URLSearchParams({ usr, pwd });
-		const resp = await fetch("/api/method/login", {
-			method: "POST",
-			credentials: "include",
-			headers: { "Content-Type": "application/x-www-form-urlencoded" },
-			body,
+	async signIn() {
+		const token = await Office.auth.getAccessToken({
+			allowSignInPrompt: true,
+			allowConsentPrompt: true,
+			forMSGraphAccess: false,
 		});
-		if (!resp.ok) throw new Error("Invalid email or password.");
-		return auth.loadSession();
+		state.msToken = token;
+		return token;
 	},
 
 	headers(extra) {
-		return Object.assign({ "X-Frappe-CSRF-Token": state.csrfToken || "" }, extra || {});
+		return Object.assign({ "Authorization": `Bearer ${state.msToken || ""}` }, extra || {});
 	},
 };
 
 
 async function apiGet(method, params) {
 	const qs = params ? "?" + new URLSearchParams(params).toString() : "";
-	const resp = await fetch(`${API_BASE}${method}${qs}`, { credentials: "include" });
+	const resp = await fetch(`${API_BASE}${method}${qs}`, { headers: auth.headers() });
 	if (!resp.ok) throw new Error(`${method} failed (${resp.status})`);
 	return (await resp.json()).message;
 }
@@ -61,7 +52,6 @@ async function apiGet(method, params) {
 async function apiPost(method, params) {
 	const resp = await fetch(`${API_BASE}${method}`, {
 		method: "POST",
-		credentials: "include",
 		headers: auth.headers({ "Content-Type": "application/x-www-form-urlencoded" }),
 		body: new URLSearchParams(params),
 	});
@@ -253,17 +243,27 @@ async function enterFilingView(user) {
 }
 
 
-function wireEvents() {
-	$("loginBtn").addEventListener("click", async () => {
-		$("loginError").textContent = "";
-		try {
-			const user = await auth.login($("usr").value.trim(), $("pwd").value);
-			if (!user) throw new Error("Sign-in failed.");
-			await enterFilingView(user);
-		} catch (e) {
-			$("loginError").textContent = e.message;
+async function doSignIn() {
+	$("loginError").textContent = "";
+	$("loginStatus").textContent = "Signing in with Microsoft 365…";
+	hide("loginBtn");
+	try {
+		await auth.signIn();
+		const session = await apiGet("GetSession");
+		if (!session || session.user === "Guest") {
+			throw new Error("Your Microsoft account isn't linked to an ERP user. Contact your administrator.");
 		}
-	});
+		await enterFilingView(session.user);
+	} catch (e) {
+		$("loginStatus").textContent = "Couldn't sign in automatically.";
+		$("loginError").textContent = e.message || "Sign-in failed.";
+		show("loginBtn");
+	}
+}
+
+
+function wireEvents() {
+	$("loginBtn").addEventListener("click", doSignIn);
 	$("search").addEventListener("input", onSearchInput);
 	$("doctype").addEventListener("change", () => { $("results").innerHTML = ""; });
 	$("saveEmail").addEventListener("change", refreshFileButton);
@@ -273,7 +273,6 @@ function wireEvents() {
 
 Office.onReady(async () => {
 	wireEvents();
-	const user = await auth.loadSession();
-	if (user) await enterFilingView(user);
-	else show("loginView");
+	show("loginView");
+	await doSignIn();
 });

@@ -108,5 +108,9 @@
 				}
 			]
 		}
-	]
+	],
+	"webApplicationInfo": {
+		"id": "d2a895aa-c239-4605-ac8e-d844341887fc",
+		"resource": "api://staging.sgcapp.com.au/d2a895aa-c239-4605-ac8e-d844341887fc"
+	}
 }
