@@ -172,16 +172,25 @@ def FileEmailToRecord(
 	if not shouldSaveEmail and not attachmentList:
 		frappe.throw(_("Select the email and/or at least one attachment to file."))
 
-	communicationName = None
-	if shouldSaveEmail:
-		communicationName = _CreateCommunication(
-			target_doctype, target_name, subject, sender, recipients, sent_date, body_html
-		)
+	try:
+		communicationName = None
+		if shouldSaveEmail:
+			communicationName = _CreateCommunication(
+				target_doctype, target_name, subject, sender, recipients, sent_date, body_html
+			)
 
-	attachParent = ("Communication", communicationName) if communicationName else (target_doctype, target_name)
-	createdFiles = _AttachFiles(attachmentList, attachParent[0], attachParent[1])
+		attachParent = ("Communication", communicationName) if communicationName else (target_doctype, target_name)
+		createdFiles = _AttachFiles(attachmentList, attachParent[0], attachParent[1])
 
-	frappe.db.commit()
+		frappe.db.commit()
+	except Exception:
+		import traceback
+		try:
+			with open("/tmp/sterp_debug.log", "a") as fh:
+				fh.write(f"{frappe.utils.now()} FILE-ERROR\n{traceback.format_exc()}\n")
+		except Exception:
+			pass
+		raise
 
 	return {
 		"success": True,
