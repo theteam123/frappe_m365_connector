@@ -20,6 +20,7 @@ const MIN_SEARCH_CHARS = 1;
 const MSAL_CLIENT_ID = "d2a895aa-c239-4605-ac8e-d844341887fc";
 const MSAL_TENANT_ID = "85e4e8f4-774e-4a96-987f-bc1a3813d984";
 const MSAL_SCOPES = ["User.Read"];
+const SIGNIN_TIMEOUT_MS = 20000;
 
 const state = {
 	msToken: null,     // Microsoft 365 ID token (identity sent to ERP)
@@ -33,6 +34,7 @@ const state = {
 // validates and maps to a Frappe user. No passwords, no manifest SSO wiring.
 const auth = {
 	pca: null,
+	account: null,
 
 	async _getApp() {
 		if (auth.pca) return auth.pca;
@@ -47,37 +49,44 @@ const auth = {
 		return auth.pca;
 	},
 
-	async signIn() {
+	async getToken() {
 		const pca = await auth._getApp();
 		const request = { scopes: MSAL_SCOPES };
+		if (auth.account) request.account = auth.account;
 		let result;
 		try {
 			result = await pca.acquireTokenSilent(request);
 		} catch (e) {
 			result = await pca.acquireTokenPopup(request);
 		}
+		auth.account = result.account;
 		state.msToken = result.idToken;
-		return state.msToken;
+		return result.idToken;
 	},
 
-	headers(extra) {
-		return Object.assign({ "Authorization": `Bearer ${state.msToken || ""}` }, extra || {});
+	async signIn() {
+		// Guard against hosts where the broker never resolves (e.g. some web cases).
+		const timeout = new Promise((_, reject) =>
+			setTimeout(() => reject(new Error("Sign-in timed out — tap the button to try again.")), SIGNIN_TIMEOUT_MS));
+		return Promise.race([auth.getToken(), timeout]);
 	},
 };
 
 
 async function apiGet(method, params) {
+	const token = await auth.getToken();
 	const qs = params ? "?" + new URLSearchParams(params).toString() : "";
-	const resp = await fetch(`${API_BASE}${method}${qs}`, { headers: auth.headers() });
+	const resp = await fetch(`${API_BASE}${method}${qs}`, { headers: { "Authorization": `Bearer ${token}` } });
 	if (!resp.ok) throw new Error(`${method} failed (${resp.status})`);
 	return (await resp.json()).message;
 }
 
 
 async function apiPost(method, params) {
+	const token = await auth.getToken();
 	const resp = await fetch(`${API_BASE}${method}`, {
 		method: "POST",
-		headers: auth.headers({ "Content-Type": "application/x-www-form-urlencoded" }),
+		headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/x-www-form-urlencoded" },
 		body: new URLSearchParams(params),
 	});
 	if (!resp.ok) {
