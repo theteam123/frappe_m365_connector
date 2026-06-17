@@ -15,24 +15,49 @@ const API_BASE = "/api/method/m365email.m365email.send_to_erp.";
 const SEARCH_DEBOUNCE_MS = 250;
 const MIN_SEARCH_CHARS = 1;
 
+// Microsoft 365 sign-in (Nested App Authentication). These are public OAuth
+// identifiers for the existing m365email Azure app — not secrets.
+const MSAL_CLIENT_ID = "d2a895aa-c239-4605-ac8e-d844341887fc";
+const MSAL_TENANT_ID = "85e4e8f4-774e-4a96-987f-bc1a3813d984";
+const MSAL_SCOPES = ["User.Read"];
+
 const state = {
-	msToken: null,     // Microsoft 365 access token (Office SSO)
+	msToken: null,     // Microsoft 365 ID token (identity sent to ERP)
 	attachments: [],   // {id, name, selected}
 	target: null,      // {doctype, value, label}
 };
 
 
-// Microsoft 365 sign-on via Office SSO. The token is sent to ERP as a bearer
-// token; ERP validates it and maps the Microsoft identity to a Frappe user.
+// Microsoft 365 sign-on via Nested App Authentication. The Office host brokers
+// a token silently; the ID token is sent to ERP as a bearer token, which ERP
+// validates and maps to a Frappe user. No passwords, no manifest SSO wiring.
 const auth = {
-	async signIn() {
-		const token = await Office.auth.getAccessToken({
-			allowSignInPrompt: true,
-			allowConsentPrompt: true,
-			forMSGraphAccess: false,
+	pca: null,
+
+	async _getApp() {
+		if (auth.pca) return auth.pca;
+		auth.pca = await msal.createNestablePublicClientApplication({
+			auth: {
+				clientId: MSAL_CLIENT_ID,
+				authority: `https://login.microsoftonline.com/${MSAL_TENANT_ID}`,
+				supportsNestedAppAuth: true,
+			},
+			cache: { cacheLocation: "localStorage" },
 		});
-		state.msToken = token;
-		return token;
+		return auth.pca;
+	},
+
+	async signIn() {
+		const pca = await auth._getApp();
+		const request = { scopes: MSAL_SCOPES };
+		let result;
+		try {
+			result = await pca.acquireTokenSilent(request);
+		} catch (e) {
+			result = await pca.acquireTokenPopup(request);
+		}
+		state.msToken = result.idToken;
+		return state.msToken;
 	},
 
 	headers(extra) {
