@@ -60,8 +60,12 @@ def ValidateAddinToken() -> None:
 		_debug(f"no user for claims aud={claims.get('aud')} email={claims.get('preferred_username') or claims.get('email')}")
 		return
 
+	# set_user resets form_dict, so preserve the request args around it
+	# (mirrors frappe's own validate_api_key_secret).
+	formDict = frappe.local.form_dict
 	frappe.set_user(user)
 	frappe.local.login_manager.user = user
+	frappe.local.form_dict = formDict
 	_debug(f"authenticated as {user}")
 
 
