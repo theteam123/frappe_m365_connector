@@ -1,0 +1,112 @@
+{
+	"$schema": "https://developer.microsoft.com/json-schemas/teams/v1.19/MicrosoftTeams.schema.json",
+	"manifestVersion": "1.19",
+	"id": "dde58b90-d9ac-43a5-9900-aa7a11c7cb7f",
+	"version": "1.0.0",
+	"name": {
+		"short": "Send to ERP",
+		"full": "Send to ERP"
+	},
+	"description": {
+		"short": "File emails and attachments into ERP.",
+		"full": "File this email and its attachments into an ERP record."
+	},
+	"developer": {
+		"name": "TierneyMorris Pty Ltd",
+		"websiteUrl": "https://ops.sgcloud.com.au",
+		"privacyUrl": "https://ops.sgcloud.com.au/app",
+		"termsOfUseUrl": "https://ops.sgcloud.com.au/app"
+	},
+	"icons": {
+		"color": "color.png",
+		"outline": "outline.png"
+	},
+	"accentColor": "#2563eb",
+	"validDomains": [
+		"ops.sgcloud.com.au"
+	],
+	"extensions": [
+		{
+			"requirements": {
+				"scopes": [
+					"mail"
+				],
+				"capabilities": [
+					{
+						"name": "Mailbox",
+						"minVersion": "1.5"
+					}
+				]
+			},
+			"runtimes": [
+				{
+					"id": "sendToErpRuntime",
+					"type": "general",
+					"code": {
+						"page": "https://ops.sgcloud.com.au/assets/m365email/sendtoerp/taskpane.html?build=1"
+					},
+					"lifetime": "short",
+					"actions": [
+						{
+							"id": "showSendToErpPane",
+							"type": "openPage",
+							"view": "sendToErpView"
+						}
+					],
+					"requirements": {
+						"capabilities": [
+							{
+								"name": "Mailbox",
+								"minVersion": "1.5"
+							}
+						]
+					}
+				}
+			],
+			"ribbons": [
+				{
+					"contexts": [
+						"mailRead"
+					],
+					"tabs": [
+						{
+							"builtInTabId": "TabDefault",
+							"groups": [
+								{
+									"id": "sgcErpGroup",
+									"label": "ERP",
+									"controls": [
+										{
+											"id": "sendToErpButton",
+											"type": "button",
+											"label": "Send to ERP",
+											"icons": [
+												{
+													"size": 16,
+													"url": "https://ops.sgcloud.com.au/assets/m365email/sendtoerp/icon-16.png"
+												},
+												{
+													"size": 32,
+													"url": "https://ops.sgcloud.com.au/assets/m365email/sendtoerp/icon-32.png"
+												},
+												{
+													"size": 80,
+													"url": "https://ops.sgcloud.com.au/assets/m365email/sendtoerp/icon-80.png"
+												}
+											],
+											"supertip": {
+												"title": "Send to ERP",
+												"description": "File this email and its attachments into an ERP record."
+											},
+											"actionId": "showSendToErpPane"
+										}
+									]
+								}
+							]
+						}
+					]
+				}
+			]
+		}
+	]
+}

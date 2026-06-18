@@ -84,12 +84,6 @@ def SearchTargets(target_doctype: Optional[str] = None, txt: str = "") -> list[d
 	Returns:
 		List of {value, label} matches, capped at MAX_SEARCH_RESULTS.
 	"""
-	try:
-		with open("/tmp/sterp_debug.log", "a") as fh:
-			fh.write(f"{frappe.utils.now()} SEARCH-ENTRY user={frappe.session.user} target_doctype={target_doctype!r} fd_keys={list(frappe.form_dict.keys())}\n")
-	except Exception:
-		pass
-
 	doctype = target_doctype or frappe.form_dict.get("doctype")
 	if not doctype:
 		frappe.throw(_("No target type was provided."))
@@ -119,13 +113,7 @@ def SearchTargets(target_doctype: Optional[str] = None, txt: str = "") -> list[d
 		order_by="modified desc",
 	)
 
-	result = [_FormatSearchRow(row, titleField) for row in records]
-	try:
-		with open("/tmp/sterp_debug.log", "a") as fh:
-			fh.write(f"{frappe.utils.now()} SEARCH user={frappe.session.user} doctype={doctype} txt={txt!r} count={len(result)}\n")
-	except Exception:
-		pass
-	return result
+	return [_FormatSearchRow(row, titleField) for row in records]
 
 
 
@@ -172,25 +160,16 @@ def FileEmailToRecord(
 	if not shouldSaveEmail and not attachmentList:
 		frappe.throw(_("Select the email and/or at least one attachment to file."))
 
-	try:
-		communicationName = None
-		if shouldSaveEmail:
-			communicationName = _CreateCommunication(
-				target_doctype, target_name, subject, sender, recipients, sent_date, body_html
-			)
+	communicationName = None
+	if shouldSaveEmail:
+		communicationName = _CreateCommunication(
+			target_doctype, target_name, subject, sender, recipients, sent_date, body_html
+		)
 
-		attachParent = ("Communication", communicationName) if communicationName else (target_doctype, target_name)
-		createdFiles = _AttachFiles(attachmentList, attachParent[0], attachParent[1])
+	attachParent = ("Communication", communicationName) if communicationName else (target_doctype, target_name)
+	createdFiles = _AttachFiles(attachmentList, attachParent[0], attachParent[1])
 
-		frappe.db.commit()
-	except Exception:
-		import traceback
-		try:
-			with open("/tmp/sterp_debug.log", "a") as fh:
-				fh.write(f"{frappe.utils.now()} FILE-ERROR\n{traceback.format_exc()}\n")
-		except Exception:
-			pass
-		raise
+	frappe.db.commit()
 
 	return {
 		"success": True,

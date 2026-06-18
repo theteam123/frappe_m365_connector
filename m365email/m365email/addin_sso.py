@@ -25,15 +25,6 @@ USER_EMAIL_CLAIMS = ("preferred_username", "upn", "email", "unique_name")
 
 
 
-def _debug(msg: str) -> None:
-	"""Temporary diagnostic logging to /tmp (staging only)."""
-	try:
-		with open("/tmp/sterp_debug.log", "a") as fh:
-			fh.write(f"{frappe.utils.now()} AUTH {msg}\n")
-	except Exception:
-		pass
-
-
 def ValidateAddinToken() -> None:
 	"""Auth hook: authenticate a request bearing an Azure AD add-in token."""
 	if frappe.local.login_manager.user not in ("", "Guest", None):
@@ -43,21 +34,16 @@ def ValidateAddinToken() -> None:
 	if not token:
 		return
 
-	_debug(f"path={frappe.request.path if frappe.request else '?'} qs={frappe.request.query_string if frappe.request else b''} bearer_present=yes")
-
 	apps = _GetConfiguredApps()
 	if not apps:
-		_debug("no configured apps")
 		return
 
 	claims = _ValidateToken(token, apps)
 	if not claims:
-		_debug("token validation FAILED")
 		return
 
 	user = _ResolveUser(claims)
 	if not user:
-		_debug(f"no user for claims aud={claims.get('aud')} email={claims.get('preferred_username') or claims.get('email')}")
 		return
 
 	# set_user resets form_dict, so preserve the request args around it
@@ -66,7 +52,6 @@ def ValidateAddinToken() -> None:
 	frappe.set_user(user)
 	frappe.local.login_manager.user = user
 	frappe.local.form_dict = formDict
-	_debug(f"authenticated as {user}")
 
 
 
@@ -108,19 +93,14 @@ def _ValidateToken(token: str, apps: list[dict]) -> Optional[dict]:
 	"""
 	unverified = _DecodeUnverified(token)
 	if not unverified:
-		_debug("could not decode token")
 		return None
-
-	_debug(f"unverified iss={unverified.get('iss')} aud={unverified.get('aud')} exp={unverified.get('exp')}")
 
 	tenantId = _MatchTenant(unverified.get("iss", ""), apps)
 	if not tenantId:
-		_debug("tenant did not match configured apps")
 		return None
 
 	signingKey = _GetSigningKey(tenantId, token)
 	if not signingKey:
-		_debug("could not fetch signing key")
 		return None
 
 	try:
@@ -130,12 +110,10 @@ def _ValidateToken(token: str, apps: list[dict]) -> Optional[dict]:
 			algorithms=ACCEPTED_ALGORITHMS,
 			options={"verify_aud": False, "require": ["exp", "iss"]},
 		)
-	except jwt.InvalidTokenError as e:
-		_debug(f"jwt.decode error: {type(e).__name__}: {e}")
+	except jwt.InvalidTokenError:
 		return None
 
 	if not _IsAcceptedAudience(claims.get("aud", ""), apps):
-		_debug(f"audience not accepted: {claims.get('aud')}")
 		return None
 
 	return claims
