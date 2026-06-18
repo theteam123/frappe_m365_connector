@@ -294,7 +294,7 @@ def create_communication_from_message_for_email_account(message, email_account, 
 
 		# Try to link to reference document
 		reference_doctype, reference_name = get_communication_reference(
-			subject, sender_email, recipients
+			subject, sender_email, recipients, cc
 		)
 
 		# Create Contact if enabled

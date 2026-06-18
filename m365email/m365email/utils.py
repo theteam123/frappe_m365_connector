@@ -6,12 +6,24 @@ Utility functions for M365 Email Integration
 """
 
 import json
+import re
 import frappe
 from frappe import _
 from datetime import datetime
 from email.utils import parseaddr
 from dateutil import parser as dateutil_parser
 import pytz
+
+
+# NOTE: Inbound emails forwarded to a tagged address like "project+3074@domain"
+# are auto-linked to the matching record. The local-part keyword (before "+")
+# selects the DocType; the plus-tag (after "+") is the human-facing identifier,
+# resolved to the real docname per DocType. Add a keyword here to support more.
+TAGGED_ADDRESS_DOCTYPES = {"project": "Project"}
+
+# NOTE: Matches "<keyword>+<identifier>@..." capturing the keyword and the
+# identifier. Anchored to the local part so it ignores the domain.
+TAGGED_ADDRESS_PATTERN = re.compile(r"^(?P<keyword>[a-z]+)\+(?P<identifier>[^@]+)@", re.IGNORECASE)
 
 
 def parse_m365_datetime(datetime_string, from_timezone_name=None, to_timezone_name=None):
@@ -201,26 +213,104 @@ def user_can_configure_account(user, email_account):
 	return False
 
 
-def get_communication_reference(subject, sender_email, recipients):
+def parse_tagged_recipient(address: str) -> tuple | None:
 	"""
-	Determine reference_doctype and reference_name for Communication
-	Can implement logic to auto-link emails to doctypes (e.g., Support Ticket by email parsing)
+	Parse a tagged recipient address like "project+3074@domain" into a
+	(reference_doctype, identifier) pair.
 
 	Args:
-		subject: Email subject line
-		sender_email: Sender's email address
-		recipients: Comma-separated string of recipient email addresses
+		address: A single bare email address
+
+	Returns:
+		tuple: (reference_doctype, identifier) if the address matches a known
+		keyword, otherwise None
+	"""
+	if not address:
+		return None
+
+	match = TAGGED_ADDRESS_PATTERN.match(address.strip())
+	if not match:
+		return None
+
+	keyword = match.group("keyword").lower()
+	reference_doctype = TAGGED_ADDRESS_DOCTYPES.get(keyword)
+	if not reference_doctype:
+		return None
+
+	identifier = match.group("identifier").strip()
+	if not identifier:
+		return None
+
+	return reference_doctype, identifier
+
+
+def resolve_project_reference(project_code: str) -> str | None:
+	"""
+	Resolve a human-facing Project code (e.g. "3074") to the Project docname.
+
+	NOTE: Project.autoname is UUID, so the code is held in the project_code
+	field, NOT the docname. The identifier from the email must be resolved here.
+
+	Args:
+		project_code: The project_code value from the tagged address
+
+	Returns:
+		str: The Project docname (UUID) if found, otherwise None
+	"""
+	if not project_code:
+		return None
+
+	return frappe.db.get_value("Project", {"project_code": project_code}, "name")
+
+
+def get_communication_reference(subject: str, sender_email: str, recipients: str, cc: str | None = None) -> tuple:
+	"""
+	Determine reference_doctype and reference_name for a Communication by
+	scanning recipient addresses for a tagged alias like "project+3074@domain".
+
+	Args:
+		subject: Email subject line (unused today, kept for signature stability)
+		sender_email: Sender's email address (unused today)
+		recipients: Comma-separated string of To recipient addresses
+		cc: Comma-separated string of CC recipient addresses (optional)
 
 	Returns:
 		tuple: (reference_doctype, reference_name) or (None, None)
 	"""
-	# TODO: Implement auto-linking logic
-	# For example:
-	# - Parse subject for ticket numbers
-	# - Match sender email to Contact/Lead
-	# - Link to specific doctypes based on rules
+	# NOTE: Linking must never break the sync run; any failure falls through to
+	# (None, None) so the Communication is still created, just unlinked.
+	try:
+		candidate_addresses = []
+		for address_string in (recipients, cc):
+			if address_string:
+				candidate_addresses.extend(part.strip() for part in address_string.split(","))
 
-	return None, None
+		for address in candidate_addresses:
+			parsed = parse_tagged_recipient(address)
+			if not parsed:
+				continue
+
+			reference_doctype, identifier = parsed
+
+			# NOTE: Only Project is wired today; its code needs UUID resolution.
+			# Other future doctypes can match the identifier as the docname.
+			if reference_doctype == "Project":
+				reference_name = resolve_project_reference(identifier)
+			else:
+				reference_name = identifier if frappe.db.exists(reference_doctype, identifier) else None
+
+			if reference_name:
+				return reference_doctype, reference_name
+
+			frappe.logger("m365email").debug(
+				f"Tagged address matched {reference_doctype} '{identifier}' but no record was found"
+			)
+
+		return None, None
+
+	except Exception as error:
+		frappe.logger("m365email").debug(f"get_communication_reference failed: {error}")
+		return None, None
 
 
 def format_email_body(body_content, content_type="html"):
