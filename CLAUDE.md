@@ -1,13 +1,11 @@
 # Claude Development Instructions — m365email
 
-## Master Coding Standards
+## Coding standards
 
-**All code MUST follow the SGC bench-wide standards (single source of truth):**
-- `/home/frappe/frappe-bench/claude-config-docs/CodingStandards.md`
-- `/home/frappe/frappe-bench/claude-config-docs/security-rules.md` (SEC-001…005)
-
-Read them before writing any code. The rules below are app-specific
-additions — they do not override the standards repo.
+All code in this app MUST follow the bench-wide standards: apply the
+`coding-standards` skill (it fronts the canonical coding standards and the SEC
+rules). Run the `coding-standards-enforcer` agent after any code change. The notes
+below are app-specific and do not override the standards.
 
 ---
 
