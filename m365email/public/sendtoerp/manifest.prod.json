@@ -2,7 +2,7 @@
 	"$schema": "https://developer.microsoft.com/json-schemas/teams/v1.19/MicrosoftTeams.schema.json",
 	"manifestVersion": "1.19",
 	"id": "dde58b90-d9ac-43a5-9900-aa7a11c7cb7f",
-	"version": "1.0.4",
+	"version": "1.0.5",
 	"name": {
 		"short": "Send to ERP",
 		"full": "Send to ERP"
@@ -21,7 +21,7 @@
 		"color": "color.png",
 		"outline": "outline.png"
 	},
-	"accentColor": "#2563eb",
+	"accentColor": "#3fd921",
 	"validDomains": [
 		"ops.sgcloud.com.au"
 	],
@@ -53,7 +53,7 @@
 					"id": "sendToErpRuntime",
 					"type": "general",
 					"code": {
-						"page": "https://ops.sgcloud.com.au/assets/m365email/sendtoerp/taskpane.html?build=5"
+						"page": "https://ops.sgcloud.com.au/assets/m365email/sendtoerp/taskpane.html?build=6"
 					},
 					"lifetime": "short",
 					"actions": [
@@ -93,15 +93,15 @@
 											"icons": [
 												{
 													"size": 16,
-													"url": "https://ops.sgcloud.com.au/assets/m365email/sendtoerp/icon-16.png"
+													"url": "https://ops.sgcloud.com.au/assets/m365email/sendtoerp/icon-16.png?v=2"
 												},
 												{
 													"size": 32,
-													"url": "https://ops.sgcloud.com.au/assets/m365email/sendtoerp/icon-32.png"
+													"url": "https://ops.sgcloud.com.au/assets/m365email/sendtoerp/icon-32.png?v=2"
 												},
 												{
 													"size": 80,
-													"url": "https://ops.sgcloud.com.au/assets/m365email/sendtoerp/icon-80.png"
+													"url": "https://ops.sgcloud.com.au/assets/m365email/sendtoerp/icon-80.png?v=2"
 												}
 											],
 											"supertip": {
