@@ -6,7 +6,7 @@
 	<title>Send to ERP</title>
 	<script src="https://appsforoffice.microsoft.com/lib/1.1/hosted/office.js"></script>
 	<script src="msal-browser.min.js"></script>
-	<link rel="stylesheet" href="taskpane.css?v=6" />
+	<link rel="stylesheet" href="taskpane.css?v=7" />
 </head>
 <body>
 	<main id="app">
@@ -42,6 +42,7 @@
 				<label for="search" id="findLabel">Find record</label>
 				<input id="search" type="text" placeholder="Start typing…" autocomplete="off" />
 				<ul id="results" class="results"></ul>
+				<button type="button" id="createNew" class="link hidden"></button>
 				<p id="chosen" class="chosen hidden"></p>
 			</fieldset>
 
@@ -55,6 +56,6 @@
 		</section>
 	</main>
 
-	<script src="taskpane.js?v=6"></script>
+	<script src="taskpane.js?v=7"></script>
 </body>
 </html>

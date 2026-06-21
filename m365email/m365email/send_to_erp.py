@@ -150,6 +150,9 @@ def FileEmailToRecord(
 	body_html: str = "",
 	save_email: int = 1,
 	comment: str = "",
+	create_new: int = 0,
+	new_name: str = "",
+	new_email: str = "",
 	attachments: str = "[]",
 ) -> dict:
 	"""File an email and/or its attachments against a record or a new task.
@@ -166,6 +169,10 @@ def FileEmailToRecord(
 		save_email: 1 to record the email itself on the timeline.
 		comment: Optional note — a timeline comment on a record, or the task's
 			description when creating a Task/To-Do.
+		create_new: 1 to create a new Contact (from new_name/new_email) and file
+			against it, instead of using an existing record.
+		new_name: Display name for the new Contact when create_new is set.
+		new_email: Email address for the new Contact when create_new is set.
 		attachments: JSON list of {file_name, content_base64, content_type}.
 
 	Returns:
@@ -177,9 +184,12 @@ def FileEmailToRecord(
 	attachmentList = _ParseAttachments(attachments)
 	commentText = (comment or "").strip()
 	isTask = target_doctype == TASK_TARGET
+	shouldCreateNew = bool(int(create_new or 0))
 
 	if isTask:
 		recordDoctype, recordName = _CreateTask(target_name, subject, commentText)
+	elif shouldCreateNew:
+		recordDoctype, recordName = _CreateContact(target_doctype, new_name, new_email)
 	else:
 		_GuardTargetExists(target_doctype, target_name)
 		if not frappe.has_permission(target_doctype, "write", target_name):
@@ -485,6 +495,31 @@ def _CreateTask(assignee: str, subject: str, comment: str) -> tuple[str, str]:
 	# when the user has create permission on ToDo (see GetPickableDoctypes).
 	task.insert(ignore_permissions=True)
 	return ("ToDo", task.name)
+
+
+def _CreateContact(target_doctype: str, name: str, email: str) -> tuple[str, str]:
+	"""Create a Contact from an email sender's name and address.
+
+	Only Contact may be created this way; other targets must already exist.
+
+	Returns:
+		(doctype, name) of the new Contact.
+	"""
+	if target_doctype != "Contact":
+		frappe.throw(_("Creating a new {0} is not supported.").format(_(target_doctype)))
+	if not frappe.has_permission("Contact", "create"):
+		frappe.throw(_("You do not have permission to create a Contact."), frappe.PermissionError)
+
+	emailAddress = (email or "").strip()
+	displayName = (name or "").strip() or (emailAddress.split("@")[0] if emailAddress else "")
+	if not displayName:
+		frappe.throw(_("A name or email is required to create a contact."))
+
+	contact = frappe.get_doc({"doctype": "Contact", "first_name": displayName})
+	if emailAddress:
+		contact.append("email_ids", {"email_id": emailAddress, "is_primary": 1})
+	contact.insert(ignore_permissions=True)
+	return ("Contact", contact.name)
 
 
 def _AddComment(doctype: str, name: str, text: str) -> None:

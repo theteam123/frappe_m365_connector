@@ -1,5 +1,6 @@
 :root {
-	--accent: #2563eb;
+	--accent: #3fd921;          /* SGC green */
+	--accent-ink: #0f3d0a;      /* dark green text for contrast on the bright accent */
 	--border: #d1d5db;
 	--muted: #6b7280;
 	--error: #b91c1c;
@@ -39,14 +40,28 @@ button.primary {
 	margin-top: 14px;
 	padding: 9px;
 	background: var(--accent);
-	color: #fff;
+	color: var(--accent-ink);
 	border: 0;
 	border-radius: 6px;
 	font-size: 14px;
+	font-weight: 700;
 	cursor: pointer;
 }
 
-button.primary:disabled { background: #9ca3af; cursor: not-allowed; }
+button.primary:disabled { background: #9ca3af; color: #fff; cursor: not-allowed; }
+
+button.link {
+	display: block;
+	background: none;
+	border: 0;
+	color: var(--ok);
+	font-size: 13px;
+	font-weight: 600;
+	cursor: pointer;
+	padding: 8px 2px 2px;
+	text-align: left;
+}
+button.link:hover { text-decoration: underline; }
 
 fieldset { border: 1px solid var(--border); border-radius: 8px; margin: 12px 0; padding: 8px 12px 12px; }
 

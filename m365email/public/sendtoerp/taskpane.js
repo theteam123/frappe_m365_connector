@@ -14,7 +14,8 @@
 const API_BASE = "/api/method/m365email.m365email.send_to_erp.";
 const SEARCH_DEBOUNCE_MS = 250;
 const MIN_SEARCH_CHARS = 1;
-const TASK_TYPE = "ToDo";  // the "Task / To-Do" target searches people, not records
+const TASK_TYPE = "ToDo";      // the "Task / To-Do" target searches people, not records
+const CONTACT_TYPE = "Contact";  // the only target that offers "create new"
 
 // Microsoft 365 sign-in (Nested App Authentication). These are public OAuth
 // identifiers for the existing m365email Azure app — not secrets.
@@ -34,7 +35,9 @@ const ENV_LABELS = [
 const state = {
 	msToken: null,     // Microsoft 365 ID token (identity sent to ERP)
 	attachments: [],   // {id, name, selected}
-	target: null,      // {doctype, value, label}
+	target: null,      // {doctype, value, label, create}
+	senderName: "",    // open email's sender display name (for "create new contact")
+	senderEmail: "",   // open email's sender address
 };
 
 
@@ -282,7 +285,8 @@ async function populateDoctypes() {
 
 // Switch the picker between filing to a record and assigning a Task/To-Do.
 function updateModeForType() {
-	const isTask = $("doctype").value === TASK_TYPE;
+	const doctype = $("doctype").value;
+	const isTask = doctype === TASK_TYPE;
 	$("findLabel").textContent = isTask ? "Assign to" : "Find record";
 	$("search").placeholder = isTask ? "Search people…" : "Start typing…";
 	$("fileBtn").textContent = isTask ? "Create task" : "Attach to ERP";
@@ -290,6 +294,29 @@ function updateModeForType() {
 	$("results").innerHTML = "";
 	hide("chosen");
 	state.target = null;
+
+	// Only Contact offers creating a brand-new record (from the email's sender).
+	if (doctype === CONTACT_TYPE) {
+		const who = state.senderName || state.senderEmail || "this sender";
+		$("createNew").textContent = `➕ Create new contact: ${who}`;
+		show("createNew");
+	} else {
+		hide("createNew");
+	}
+	refreshFileButton();
+}
+
+
+// Choose to create a new Contact from the open email's sender, instead of an
+// existing record.
+function chooseCreateNew() {
+	const who = state.senderName || state.senderEmail || "new contact";
+	state.target = { doctype: CONTACT_TYPE, value: "", label: who, create: true };
+	$("results").innerHTML = "";
+	$("search").value = "";
+	hide("createNew");
+	$("chosen").textContent = `→ New contact: ${who}`;
+	show("chosen");
 	refreshFileButton();
 }
 
@@ -345,9 +372,10 @@ async function runSearch(txt) {
 
 
 function chooseTarget(doctype, row) {
-	state.target = { doctype, value: row.value, label: row.label };
+	state.target = { doctype, value: row.value, label: row.label, create: false };
 	$("results").innerHTML = "";
 	$("search").value = "";
+	hide("createNew");
 	$("chosen").textContent = `→ ${row.label}${row.sublabel ? " · " + row.sublabel : ""}`;
 	show("chosen");
 	refreshFileButton();
@@ -377,9 +405,13 @@ async function onFile() {
 			payload.push({ file_name: a.name, content_base64: content.content, content_type: content.format });
 		}
 		const meta = emailMeta();
+		const isCreate = state.target.create === true;
 		const result = await apiPost("FileEmailToRecord", Object.assign({
 			target_doctype: state.target.doctype,
 			target_name: state.target.value,
+			create_new: isCreate ? 1 : 0,
+			new_name: isCreate ? state.senderName : "",
+			new_email: isCreate ? state.senderEmail : "",
 			save_email: $("saveEmail").checked ? 1 : 0,
 			comment: $("comment").value,
 			body_html: await getEmailBodyHtml(),
@@ -405,6 +437,9 @@ async function enterFilingView(user) {
 	hide("loginView");
 	show("fileView");
 	$("whoami").textContent = user;
+	const from = Office.context.mailbox.item.from || Office.context.mailbox.item.sender || {};
+	state.senderName = from.displayName || "";
+	state.senderEmail = from.emailAddress || "";
 	readAttachments();
 	renderAttachments();
 	await populateDoctypes();
@@ -435,6 +470,7 @@ function wireEvents() {
 	$("loginBtn").addEventListener("click", doSignIn);
 	$("search").addEventListener("input", onSearchInput);
 	$("doctype").addEventListener("change", updateModeForType);
+	$("createNew").addEventListener("click", chooseCreateNew);
 	$("saveEmail").addEventListener("change", refreshFileButton);
 	$("comment").addEventListener("input", refreshFileButton);
 	$("fileBtn").addEventListener("click", onFile);
