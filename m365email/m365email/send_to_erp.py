@@ -29,6 +29,8 @@ DEFAULT_PICKABLE_DOCTYPES = [
 
 MAX_SEARCH_RESULTS = 20
 MAX_ATTACHMENT_BYTES = 35 * 1024 * 1024  # 35 MB — above Outlook's own attach limit
+CONTACT_EXTRACTION_MAX_CHARS = 8000  # email body chars sent to AI (covers most signatures)
+CONTACT_EXTRACTION_MAX_TOKENS = 400  # AI response cap for contact-field extraction
 
 # Secondary detail shown beneath the name in the picker, to disambiguate records
 # that share a title (e.g. two contacts both named "Paul Johnson").
@@ -189,7 +191,7 @@ def FileEmailToRecord(
 	if isTask:
 		recordDoctype, recordName = _CreateTask(target_name, subject, commentText)
 	elif shouldCreateNew:
-		recordDoctype, recordName = _CreateContact(target_doctype, new_name, new_email)
+		recordDoctype, recordName = _CreateContact(target_doctype, new_name, new_email, body_html)
 	else:
 		_GuardTargetExists(target_doctype, target_name)
 		if not frappe.has_permission(target_doctype, "write", target_name):
@@ -515,13 +517,15 @@ def _CreateTask(assignee: str, subject: str, comment: str) -> tuple[str, str]:
 	return ("ToDo", task.name)
 
 
-def _CreateContact(target_doctype: str, name: str, email: str) -> tuple[str, str]:
-	"""Create a Contact from an email sender's name and address.
+def _CreateContact(target_doctype: str, name: str, email: str, body_html: str = "") -> tuple[str, str]:
+	"""Create a Contact from an email sender, enriched from the signature.
 
-	Only Contact may be created this way; other targets must already exist.
+	Only Contact may be created this way; other targets must already exist. An
+	existing contact with the same email is reused rather than duplicated. Phone,
+	title and company are pulled from the signature via the bench's AI extractor.
 
 	Returns:
-		(doctype, name) of the new Contact.
+		(doctype, name) of the Contact (existing or new).
 	"""
 	if target_doctype != "Contact":
 		frappe.throw(_("Creating a new {0} is not supported.").format(_(target_doctype)))
@@ -537,16 +541,92 @@ def _CreateContact(target_doctype: str, name: str, email: str) -> tuple[str, str
 	if not frappe.has_permission("Contact", "create"):
 		frappe.throw(_("You do not have permission to create a Contact."), frappe.PermissionError)
 
-	displayName = (name or "").strip() or (emailAddress.split("@")[0] if emailAddress else "")
-	if not displayName:
+	extracted = _ExtractContactFields(body_html, name, emailAddress)
+
+	firstName = extracted.get("first_name") or (name.split(" ", 1)[0] if name else "") \
+		or (emailAddress.split("@")[0] if emailAddress else "")
+	if not firstName:
 		frappe.throw(_("A name or email is required to create a contact."))
 
-	contact = frappe.get_doc({"doctype": "Contact", "first_name": displayName})
-	if emailAddress:
-		contact.append("email_ids", {"email_id": emailAddress, "is_primary": 1})
-		contact.email_id = emailAddress  # populate the shown field, not just the child row
+	contact = frappe.get_doc({"doctype": "Contact", "first_name": firstName})
+	lastName = extracted.get("last_name") or (name.split(" ", 1)[1] if name and " " in name else "")
+	if lastName:
+		contact.last_name = lastName
+	if extracted.get("designation"):
+		contact.designation = extracted["designation"]
+	if extracted.get("company_name"):
+		contact.company_name = extracted["company_name"]
+
+	finalEmail = (extracted.get("email") or emailAddress or "").strip().lower()
+	if finalEmail:
+		contact.append("email_ids", {"email_id": finalEmail, "is_primary": 1})
+		contact.email_id = finalEmail  # populate the shown field, not just the child row
+
+	if extracted.get("phone"):
+		contact.append("phone_nos", {"phone": extracted["phone"], "is_primary_phone": 1})
+		contact.phone = extracted["phone"]
+	if extracted.get("mobile"):
+		contact.append("phone_nos", {"phone": extracted["mobile"], "is_primary_mobile_no": 1})
+		contact.mobile_no = extracted["mobile"]
+
 	contact.insert(ignore_permissions=True)
 	return ("Contact", contact.name)
+
+
+def _ExtractContactFields(body_html: str, name: str, email: str) -> dict[str, str]:
+	"""Pull the sender's contact details from the email signature via the bench's
+	Claude integration. Returns {} on any failure so contact creation proceeds.
+	"""
+	try:
+		from anthropic import Anthropic
+		from claude_agent.claude_agent.model_config import GetActiveModel
+
+		apiKey = frappe.get_single("Agent Settings").get_password("anthropic_api_key", raise_exception=False)
+		if not apiKey:
+			return {}
+
+		plainBody = frappe.utils.strip_html(body_html or "")[:CONTACT_EXTRACTION_MAX_CHARS]
+		if not plainBody.strip():
+			return {}
+
+		tool = {
+			"name": "contact_details",
+			"description": "Record the sender's contact details taken from their email signature.",
+			"input_schema": {
+				"type": "object",
+				"properties": {
+					"first_name": {"type": "string"},
+					"last_name": {"type": "string"},
+					"email": {"type": "string"},
+					"phone": {"type": "string", "description": "Landline or office phone"},
+					"mobile": {"type": "string", "description": "Mobile / cell number"},
+					"designation": {"type": "string", "description": "Job title or position"},
+					"company_name": {"type": "string"},
+				},
+			},
+		}
+		systemPrompt = (
+			"Extract the contact details of the person who SENT this email, from their "
+			"signature. Only fill a field when you are confident; otherwise leave it out. "
+			"Never invent values."
+		)
+		prompt = f"Sender name: {name}\nSender email: {email}\n\nEmail:\n{plainBody}"
+
+		response = Anthropic(api_key=apiKey).messages.create(
+			model=GetActiveModel(),
+			max_tokens=CONTACT_EXTRACTION_MAX_TOKENS,
+			system=systemPrompt,
+			tools=[tool],
+			tool_choice={"type": "tool", "name": "contact_details"},
+			messages=[{"role": "user", "content": prompt}],
+		)
+		for block in response.content:
+			if getattr(block, "type", None) == "tool_use":
+				return {k: v.strip() for k, v in (block.input or {}).items() if isinstance(v, str) and v.strip()}
+		return {}
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Send-to-ERP contact extraction failed")
+		return {}
 
 
 def _AddComment(doctype: str, name: str, text: str) -> None:
