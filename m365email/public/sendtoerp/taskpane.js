@@ -22,6 +22,13 @@ const MSAL_TENANT_ID = "85e4e8f4-774e-4a96-987f-bc1a3813d984";
 const MSAL_SCOPES = ["User.Read"];
 const SIGNIN_TIMEOUT_MS = 20000;
 
+// Environment badge. The panel is served same-origin with its ERP site, so the
+// host reliably identifies whether the user is filing to Production or Staging.
+const ENV_LABELS = [
+	{ match: "ops.sgcloud", label: "Production", className: "env--prod" },
+	{ match: "staging.sgcapp", label: "Staging", className: "env--staging" },
+];
+
 const state = {
 	msToken: null,     // Microsoft 365 ID token (identity sent to ERP)
 	attachments: [],   // {id, name, selected}
@@ -109,6 +116,18 @@ function extractError(text) {
 function $(id) { return document.getElementById(id); }
 function show(id) { $(id).classList.remove("hidden"); }
 function hide(id) { $(id).classList.add("hidden"); }
+
+
+function applyEnvBadges() {
+	const host = window.location.hostname;
+	const known = ENV_LABELS.find(envEntry => host.includes(envEntry.match));
+	const label = known ? known.label : host;
+	const className = known ? known.className : "env--unknown";
+	document.querySelectorAll(".env").forEach(badgeElement => {
+		badgeElement.textContent = label;
+		badgeElement.classList.add(className);
+	});
+}
 
 
 /* ---- Office.js item reading ---- */
@@ -322,6 +341,11 @@ function wireEvents() {
 	$("saveEmail").addEventListener("change", refreshFileButton);
 	$("fileBtn").addEventListener("click", onFile);
 }
+
+
+// Render the environment badge immediately — it is pure DOM and must not depend
+// on the Office host initializing (so it shows even if Office.js is slow).
+applyEnvBadges();
 
 
 Office.onReady(async () => {

@@ -6,12 +6,13 @@
 	<title>Send to ERP</title>
 	<script src="https://appsforoffice.microsoft.com/lib/1.1/hosted/office.js"></script>
 	<script src="msal-browser.min.js"></script>
-	<link rel="stylesheet" href="taskpane.css?v=2" />
+	<link rel="stylesheet" href="taskpane.css?v=3" />
 </head>
 <body>
 	<main id="app">
 		<!-- Sign-in view (Microsoft 365) -->
 		<section id="loginView" class="view hidden">
+			<span id="envLabelLogin" class="env"></span>
 			<h1>Send to ERP</h1>
 			<p id="loginStatus" class="muted">Signing in with Microsoft 365…</p>
 			<button id="loginBtn" class="primary hidden">Sign in with Microsoft 365</button>
@@ -21,6 +22,7 @@
 		<!-- Filing view -->
 		<section id="fileView" class="view hidden">
 			<header class="topbar">
+				<span id="envLabel" class="env"></span>
 				<span id="whoami" class="muted"></span>
 			</header>
 
@@ -48,6 +50,6 @@
 		</section>
 	</main>
 
-	<script src="taskpane.js?v=2"></script>
+	<script src="taskpane.js?v=3"></script>
 </body>
 </html>

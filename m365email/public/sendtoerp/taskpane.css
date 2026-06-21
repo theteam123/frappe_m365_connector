@@ -68,4 +68,19 @@ legend { font-weight: 600; padding: 0 4px; }
 
 .chosen { margin-top: 8px; padding: 7px 8px; background: #ecfdf5; border-radius: 6px; }
 
-.topbar { display: flex; justify-content: flex-end; font-size: 12px; }
+.topbar { display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
+
+.env {
+	display: inline-block;
+	margin-bottom: 8px;
+	padding: 2px 8px;
+	border-radius: 10px;
+	font-size: 11px;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+.topbar .env { margin-bottom: 0; }
+.env--prod { background: #ecfdf5; color: var(--ok); }
+.env--staging { background: #fef3c7; color: #92400e; }
+.env--unknown { background: #f3f4f6; color: var(--muted); }
