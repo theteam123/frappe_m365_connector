@@ -36,6 +36,11 @@ SECONDARY_FIELDS = {
 	"Contact": "email_id",
 }
 
+# Special pseudo-target: rather than an existing record, the user picks a person
+# and a new ToDo (task) is created for them, with the email filed against it.
+TASK_TARGET = "ToDo"
+TASK_TARGET_LABEL = "Task / To-Do"
+
 
 
 @frappe.whitelist()
@@ -73,6 +78,9 @@ def GetPickableDoctypes() -> list[dict]:
 
 		pickable.append({"doctype": doctype, "label": _(doctype)})
 
+	if frappe.has_permission(TASK_TARGET, "create"):
+		pickable.append({"doctype": TASK_TARGET, "label": _(TASK_TARGET_LABEL)})
+
 	return pickable
 
 
@@ -95,6 +103,10 @@ def SearchTargets(target_doctype: Optional[str] = None, txt: str = "") -> list[d
 		frappe.throw(_("No target type was provided."))
 
 	_GuardPickableDoctype(doctype)
+
+	# The Task/To-Do target searches people to assign to, not existing records.
+	if doctype == TASK_TARGET:
+		return _SearchUsers(txt)
 
 	if not frappe.has_permission(doctype, "read"):
 		frappe.throw(_("You do not have access to {0}").format(_(doctype)), frappe.PermissionError)
@@ -137,51 +149,65 @@ def FileEmailToRecord(
 	sent_date: Optional[str] = None,
 	body_html: str = "",
 	save_email: int = 1,
+	comment: str = "",
 	attachments: str = "[]",
 ) -> dict:
-	"""File an email and/or its attachments against an ERP record.
+	"""File an email and/or its attachments against a record or a new task.
 
 	Args:
-		target_doctype: Doctype to attach to — must be in the pickable allow-list.
-		target_name: Record name to attach to.
+		target_doctype: Filing target — a pickable doctype, or ``ToDo`` to create
+			a new task (in which case ``target_name`` is the assignee's user id).
+		target_name: Record to file against, or the assignee for a Task/To-Do.
 		subject: Email subject line.
 		sender: Sender email address.
 		recipients: Recipient email addresses (comma separated).
 		sent_date: ISO timestamp the email was sent/received.
 		body_html: HTML body of the email.
-		save_email: 1 to record the email itself on the record's timeline.
+		save_email: 1 to record the email itself on the timeline.
+		comment: Optional note — a timeline comment on a record, or the task's
+			description when creating a Task/To-Do.
 		attachments: JSON list of {file_name, content_base64, content_type}.
 
 	Returns:
 		{success, communication, files, message} describing what was created.
 	"""
 	_GuardPickableDoctype(target_doctype)
-	_GuardTargetExists(target_doctype, target_name)
-
-	if not frappe.has_permission(target_doctype, "write", target_name):
-		frappe.throw(
-			_("You do not have permission to attach to {0} {1}").format(_(target_doctype), target_name),
-			frappe.PermissionError,
-		)
 
 	shouldSaveEmail = bool(int(save_email or 0))
 	attachmentList = _ParseAttachments(attachments)
+	commentText = (comment or "").strip()
+	isTask = target_doctype == TASK_TARGET
 
-	if not shouldSaveEmail and not attachmentList:
-		frappe.throw(_("Select the email and/or at least one attachment to file."))
+	if isTask:
+		recordDoctype, recordName = _CreateTask(target_name, subject, commentText)
+	else:
+		_GuardTargetExists(target_doctype, target_name)
+		if not frappe.has_permission(target_doctype, "write", target_name):
+			frappe.throw(
+				_("You do not have permission to attach to {0} {1}").format(_(target_doctype), target_name),
+				frappe.PermissionError,
+			)
+		if not shouldSaveEmail and not attachmentList and not commentText:
+			frappe.throw(_("Add a comment, or select the email and/or an attachment to file."))
+		recordDoctype, recordName = target_doctype, target_name
 
 	# Attach files to the target record itself so they show in the record's
 	# standard attachments, and capture their URLs for the email body.
-	createdFiles = _AttachFiles(attachmentList, target_doctype, target_name)
+	createdFiles = _AttachFiles(attachmentList, recordDoctype, recordName)
 
 	# Save the email on the timeline, listing the attachments in its body so they
 	# are reachable directly beneath the email as well.
 	communicationName = None
 	if shouldSaveEmail:
 		communicationName = _CreateCommunication(
-			target_doctype, target_name, subject, sender, recipients, sent_date,
+			recordDoctype, recordName, subject, sender, recipients, sent_date,
 			_AppendAttachmentLinks(body_html, createdFiles),
 		)
+
+	# On a record the comment is a timeline note; on a task it is already the
+	# task's description, so it is not duplicated here.
+	if commentText and not isTask:
+		_AddComment(recordDoctype, recordName, commentText)
 
 	frappe.db.commit()
 
@@ -189,15 +215,39 @@ def FileEmailToRecord(
 		"success": True,
 		"communication": communicationName,
 		"files": createdFiles,
-		"message": _BuildSummary(shouldSaveEmail, createdFiles, target_doctype, target_name),
+		"message": _BuildSummary(isTask, shouldSaveEmail, createdFiles, recordDoctype, recordName, bool(commentText)),
 	}
 
 
 
 def _GuardPickableDoctype(doctype: str) -> None:
-	"""Reject any doctype not in the pickable allow-list."""
-	if doctype not in DEFAULT_PICKABLE_DOCTYPES:
+	"""Reject any target not in the pickable allow-list (Task/To-Do included)."""
+	if doctype != TASK_TARGET and doctype not in DEFAULT_PICKABLE_DOCTYPES:
 		frappe.throw(_("{0} is not available as a filing target.").format(doctype), frappe.PermissionError)
+
+
+def _SearchUsers(txt: str) -> list[dict]:
+	"""Search enabled system users to assign a task to, for the add-in picker.
+
+	Returns:
+		List of {value, label, sublabel} where value is the user id (email),
+		label the full name, and sublabel the email — capped at MAX_SEARCH_RESULTS.
+	"""
+	searchText = (txt or "").strip()
+	orFilters = {}
+	if searchText:
+		orFilters["full_name"] = ["like", f"%{searchText}%"]
+		orFilters["name"] = ["like", f"%{searchText}%"]
+
+	users = frappe.get_list(
+		"User",
+		filters={"enabled": 1, "user_type": "System User"},
+		or_filters=orFilters or None,
+		fields=["name", "full_name"],
+		limit_page_length=MAX_SEARCH_RESULTS,
+		order_by="full_name asc",
+	)
+	return [{"value": user["name"], "label": user.get("full_name") or user["name"], "sublabel": user["name"]} for user in users]
 
 
 
@@ -386,13 +436,57 @@ def _AttachFiles(attachmentList: list[dict], parentDoctype: str, parentName: str
 
 
 
-def _BuildSummary(savedEmail: bool, createdFiles: list[dict], targetDoctype: str, targetName: str) -> str:
+def _BuildSummary(isTask: bool, savedEmail: bool, createdFiles: list[dict], targetDoctype: str, targetName: str, hasComment: bool) -> str:
 	"""Build a human-readable confirmation message."""
 	parts = []
 	if savedEmail:
 		parts.append(_("the email"))
 	if createdFiles:
 		parts.append(_("{0} attachment(s)").format(len(createdFiles)))
+	if hasComment and not isTask:
+		parts.append(_("a comment"))
+
+	if isTask:
+		if parts:
+			return _("Created a task for {0} with {1}.").format(targetName, _(" and ").join(parts))
+		return _("Created a task for {0}.").format(targetName)
 
 	what = _(" and ").join(parts) if parts else _("nothing")
 	return _("Filed {0} to {1} {2}.").format(what, _(targetDoctype), targetName)
+
+
+def _CreateTask(assignee: str, subject: str, comment: str) -> tuple[str, str]:
+	"""Create a ToDo (task) assigned to the given user.
+
+	Args:
+		assignee: User id (email) to assign the task to.
+		subject: Email subject, used as a fallback task description.
+		comment: The user's note, used as the task description when provided.
+
+	Returns:
+		(doctype, name) of the new ToDo, so the email and attachments can be
+		filed against it like any other record.
+	"""
+	if not assignee or not frappe.db.exists("User", assignee):
+		frappe.throw(_("Select a person to assign the task to."))
+
+	description = comment or subject or _("Email filed from Outlook")
+	task = frappe.get_doc({
+		"doctype": "ToDo",
+		"allocated_to": assignee,
+		"assigned_by": frappe.session.user,
+		"description": frappe.utils.escape_html(description).replace("\n", "<br>"),
+		"priority": "Medium",
+		"status": "Open",
+	})
+	# Authorization is enforced upstream: the Task/To-Do option is only offered
+	# when the user has create permission on ToDo (see GetPickableDoctypes).
+	task.insert(ignore_permissions=True)
+	return ("ToDo", task.name)
+
+
+def _AddComment(doctype: str, name: str, text: str) -> None:
+	"""Add a timeline comment to the target record (text escaped to HTML)."""
+	content = frappe.utils.escape_html(text).replace("\n", "<br>")
+	doc = frappe.get_doc(doctype, name)
+	doc.add_comment("Comment", content)

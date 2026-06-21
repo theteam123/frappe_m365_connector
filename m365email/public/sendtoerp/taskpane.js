@@ -14,6 +14,7 @@
 const API_BASE = "/api/method/m365email.m365email.send_to_erp.";
 const SEARCH_DEBOUNCE_MS = 250;
 const MIN_SEARCH_CHARS = 1;
+const TASK_TYPE = "ToDo";  // the "Task / To-Do" target searches people, not records
 
 // Microsoft 365 sign-in (Nested App Authentication). These are public OAuth
 // identifiers for the existing m365email Azure app — not secrets.
@@ -275,6 +276,21 @@ async function populateDoctypes() {
 		opt.textContent = t.label;
 		select.appendChild(opt);
 	});
+	updateModeForType();
+}
+
+
+// Switch the picker between filing to a record and assigning a Task/To-Do.
+function updateModeForType() {
+	const isTask = $("doctype").value === TASK_TYPE;
+	$("findLabel").textContent = isTask ? "Assign to" : "Find record";
+	$("search").placeholder = isTask ? "Search people…" : "Start typing…";
+	$("fileBtn").textContent = isTask ? "Create task" : "Attach to ERP";
+	$("search").value = "";
+	$("results").innerHTML = "";
+	hide("chosen");
+	state.target = null;
+	refreshFileButton();
 }
 
 
@@ -341,7 +357,11 @@ function chooseTarget(doctype, row) {
 function refreshFileButton() {
 	const hasAttachmentsSelected = state.attachments.some(a => a.selected);
 	const wantsEmail = $("saveEmail").checked;
-	$("fileBtn").disabled = !state.target || (!hasAttachmentsSelected && !wantsEmail);
+	const isTask = $("doctype").value === TASK_TYPE;
+	// For a task, choosing the assignee is enough; for a record, also require the
+	// email, an attachment, or a comment.
+	const hasContent = isTask || hasAttachmentsSelected || wantsEmail || $("comment").value.trim() !== "";
+	$("fileBtn").disabled = !state.target || !hasContent;
 }
 
 
@@ -361,6 +381,7 @@ async function onFile() {
 			target_doctype: state.target.doctype,
 			target_name: state.target.value,
 			save_email: $("saveEmail").checked ? 1 : 0,
+			comment: $("comment").value,
 			body_html: await getEmailBodyHtml(),
 			attachments: JSON.stringify(payload),
 		}, meta));
@@ -413,8 +434,9 @@ async function doSignIn() {
 function wireEvents() {
 	$("loginBtn").addEventListener("click", doSignIn);
 	$("search").addEventListener("input", onSearchInput);
-	$("doctype").addEventListener("change", () => { $("results").innerHTML = ""; });
+	$("doctype").addEventListener("change", updateModeForType);
 	$("saveEmail").addEventListener("change", refreshFileButton);
+	$("comment").addEventListener("input", refreshFileButton);
 	$("fileBtn").addEventListener("click", onFile);
 }
 

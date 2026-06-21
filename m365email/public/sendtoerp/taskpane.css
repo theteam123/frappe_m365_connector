@@ -24,13 +24,15 @@ label { display: block; margin: 10px 0 4px; font-weight: 600; }
 
 label.check { font-weight: 400; display: flex; align-items: center; gap: 6px; }
 
-input[type="text"], input[type="email"], input[type="password"], select {
+input[type="text"], input[type="email"], input[type="password"], select, textarea {
 	width: 100%;
 	padding: 7px 8px;
 	border: 1px solid var(--border);
 	border-radius: 6px;
 	font-size: 14px;
 }
+
+textarea { font-family: inherit; resize: vertical; }
 
 button.primary {
 	width: 100%;
