@@ -2,7 +2,7 @@
 	"$schema": "https://developer.microsoft.com/json-schemas/teams/v1.19/MicrosoftTeams.schema.json",
 	"manifestVersion": "1.19",
 	"id": "88672082-87a4-4887-a257-f4686dfc8f1a",
-	"version": "1.0.5",
+	"version": "1.0.6",
 	"name": {
 		"short": "Send to ERP (Stg)",
 		"full": "Send to ERP (Staging)"
@@ -25,6 +25,16 @@
 	"validDomains": [
 		"staging.sgcapp.com.au"
 	],
+	"authorization": {
+		"permissions": {
+			"resourceSpecific": [
+				{
+					"name": "MailboxItem.ReadWrite.User",
+					"type": "Delegated"
+				}
+			]
+		}
+	},
 	"extensions": [
 		{
 			"requirements": {
@@ -43,7 +53,7 @@
 					"id": "sendToErpRuntime",
 					"type": "general",
 					"code": {
-						"page": "https://staging.sgcapp.com.au/assets/m365email/sendtoerp/taskpane.html?build=5"
+						"page": "https://staging.sgcapp.com.au/assets/m365email/sendtoerp/taskpane.html?build=6"
 					},
 					"lifetime": "short",
 					"actions": [

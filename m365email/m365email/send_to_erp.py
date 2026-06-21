@@ -30,6 +30,12 @@ DEFAULT_PICKABLE_DOCTYPES = [
 MAX_SEARCH_RESULTS = 20
 MAX_ATTACHMENT_BYTES = 35 * 1024 * 1024  # 35 MB — above Outlook's own attach limit
 
+# Secondary detail shown beneath the name in the picker, to disambiguate records
+# that share a title (e.g. two contacts both named "Paul Johnson").
+SECONDARY_FIELDS = {
+	"Contact": "email_id",
+}
+
 
 
 @frappe.whitelist()
@@ -82,7 +88,7 @@ def SearchTargets(target_doctype: Optional[str] = None, txt: str = "") -> list[d
 		txt: Partial text to match against name or the doctype's title field.
 
 	Returns:
-		List of {value, label} matches, capped at MAX_SEARCH_RESULTS.
+		List of {value, label, sublabel} matches, capped at MAX_SEARCH_RESULTS.
 	"""
 	doctype = target_doctype or frappe.form_dict.get("doctype")
 	if not doctype:
@@ -97,6 +103,10 @@ def SearchTargets(target_doctype: Optional[str] = None, txt: str = "") -> list[d
 	fields = ["name"]
 	if titleField and titleField != "name":
 		fields.append(titleField)
+
+	secondaryField = _GetSecondaryField(doctype)
+	if secondaryField and secondaryField not in fields:
+		fields.append(secondaryField)
 
 	searchText = (txt or "").strip()
 	orFilters = {}
@@ -113,7 +123,7 @@ def SearchTargets(target_doctype: Optional[str] = None, txt: str = "") -> list[d
 		order_by="modified desc",
 	)
 
-	return [_FormatSearchRow(row, titleField) for row in records]
+	return [_FormatSearchRow(row, titleField, secondaryField) for row in records]
 
 
 
@@ -201,16 +211,33 @@ def _GetTitleField(doctype: str) -> Optional[str]:
 
 
 
-def _FormatSearchRow(row: dict, titleField: Optional[str]) -> dict:
-	"""Format one search result as {value, label} for the picker.
+def _GetSecondaryField(doctype: str) -> Optional[str]:
+	"""Return a disambiguating sub-field for the doctype, if it has one.
+
+	Some doctypes (notably Contact) can have many records sharing a title, so the
+	picker shows a secondary detail beneath the name. Only a field that actually
+	exists on the doctype is returned.
+	"""
+	field = SECONDARY_FIELDS.get(doctype)
+	if field and frappe.get_meta(doctype).has_field(field):
+		return field
+	return None
+
+
+
+def _FormatSearchRow(row: dict, titleField: Optional[str], secondaryField: Optional[str] = None) -> dict:
+	"""Format one search result as {value, label, sublabel} for the picker.
 
 	The label shows the human-readable title (e.g. project number/name) and
-	never the raw record id, which for several doctypes is an opaque UUID.
+	never the raw record id, which for several doctypes is an opaque UUID. The
+	sublabel carries a disambiguating detail (e.g. a contact's email) so records
+	with identical names can be told apart.
 	"""
 	name = row.get("name")
 	title = row.get(titleField) if titleField else None
 	label = title if title else name
-	return {"value": name, "label": label}
+	sublabel = row.get(secondaryField) if secondaryField else None
+	return {"value": name, "label": label, "sublabel": sublabel or ""}
 
 
 

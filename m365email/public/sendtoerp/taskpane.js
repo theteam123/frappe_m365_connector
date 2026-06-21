@@ -310,7 +310,15 @@ async function runSearch(txt) {
 		}
 		rows.forEach(row => {
 			const li = document.createElement("li");
-			li.textContent = row.label;
+			const main = document.createElement("div");
+			main.textContent = row.label;
+			li.appendChild(main);
+			if (row.sublabel) {
+				const sub = document.createElement("div");
+				sub.className = "result-sub";
+				sub.textContent = row.sublabel;
+				li.appendChild(sub);
+			}
 			li.addEventListener("click", () => chooseTarget(doctype, row));
 			list.appendChild(li);
 		});
@@ -324,7 +332,7 @@ function chooseTarget(doctype, row) {
 	state.target = { doctype, value: row.value, label: row.label };
 	$("results").innerHTML = "";
 	$("search").value = "";
-	$("chosen").textContent = `→ ${row.label}`;
+	$("chosen").textContent = `→ ${row.label}${row.sublabel ? " · " + row.sublabel : ""}`;
 	show("chosen");
 	refreshFileButton();
 }
