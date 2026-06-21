@@ -205,18 +205,21 @@ def FileEmailToRecord(
 	# standard attachments, and capture their URLs for the email body.
 	createdFiles = _AttachFiles(attachmentList, recordDoctype, recordName)
 
-	# Save the email on the timeline, listing the attachments in its body so they
-	# are reachable directly beneath the email as well.
+	# Build the email body: on a record, a filing note rides at the top so the
+	# comment shares the email's timeline entry; then the attachment links.
 	communicationName = None
 	if shouldSaveEmail:
+		emailBody = body_html
+		if commentText and not isTask:
+			emailBody = _PrependNote(emailBody, commentText)
 		communicationName = _CreateCommunication(
 			recordDoctype, recordName, subject, sender, recipients, sent_date,
-			_AppendAttachmentLinks(body_html, createdFiles),
+			_AppendAttachmentLinks(emailBody, createdFiles),
 		)
 
-	# On a record the comment is a timeline note; on a task it is already the
-	# task's description, so it is not duplicated here.
-	if commentText and not isTask:
+	# A comment with no email to ride along becomes a standalone timeline comment.
+	# (A task already carries the comment as its description.)
+	if commentText and not isTask and not shouldSaveEmail:
 		_AddComment(recordDoctype, recordName, commentText)
 
 	frappe.db.commit()
@@ -354,6 +357,18 @@ def _AppendAttachmentLinks(body_html: str, files: list[dict]) -> str:
 	)
 	heading = _("Attachments filed to this record")
 	return (body_html or "") + "<hr><p><strong>{0}</strong></p><ul>{1}</ul>".format(heading, htmlItems)
+
+
+def _PrependNote(body_html: str, comment: str) -> str:
+	"""Prepend a filing note to the email body (escaped, styled) so the comment
+	sits inside the email's own timeline entry, directly above the message."""
+	note = frappe.utils.escape_html(comment).replace("\n", "<br>")
+	block = (
+		'<div style="border-left:4px solid #3fd921;background:#f0fdf4;'
+		'padding:8px 12px;margin:0 0 12px 0;border-radius:4px;">'
+		"<strong>{0}</strong><br>{1}</div>"
+	).format(_("Note added when filing"), note)
+	return block + (body_html or "")
 
 
 
