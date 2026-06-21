@@ -555,7 +555,11 @@ def _CreateContact(target_doctype: str, name: str, email: str, body_html: str = 
 	if extracted.get("designation"):
 		contact.designation = extracted["designation"]
 	if extracted.get("company_name"):
-		contact.company_name = extracted["company_name"]
+		# company_name is a Link to Organisation; only set it when that org already
+		# exists, otherwise the insert fails with a link-validation error.
+		orgName = frappe.db.get_value("Organisation", extracted["company_name"], "name")
+		if orgName:
+			contact.company_name = orgName
 
 	finalEmail = (extracted.get("email") or emailAddress or "").strip().lower()
 	if finalEmail:
