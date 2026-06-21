@@ -1,0 +1,22 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <title>Send to ERP</title>
+  <!-- SGC Green rounded badge -->
+  <rect x="0" y="0" width="256" height="256" rx="56" ry="56" fill="#3fd921"/>
+
+  <!-- Envelope body (white) -->
+  <rect x="30" y="84" width="120" height="88" rx="14" ry="14" fill="#ffffff"/>
+  <!-- Envelope flap crease (green V) -->
+  <path d="M37 91 L90 132 L143 91"
+        fill="none" stroke="#3fd921" stroke-width="11"
+        stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Outgoing arrow (white) pointing right -->
+  <path d="M150 116
+           L196 116
+           L196 100
+           L232 128
+           L196 156
+           L196 140
+           L150 140 Z"
+        fill="#ffffff"/>
+</svg>
