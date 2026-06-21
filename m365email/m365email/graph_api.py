@@ -162,10 +162,13 @@ def get_messages_delta(user_email, access_token, folder='inbox', delta_token=Non
 	Returns:
 		dict: Response with messages and delta link
 	"""
-	if delta_token:
-		# Use the delta token URL directly
+	if delta_token and delta_token.startswith("http"):
+		# Use the stored delta link URL directly
 		endpoint = delta_token
 	else:
+		# Initial delta query. Also self-heals if a corrupt non-URL token was
+		# stored: ignore it and start a fresh delta rather than building an
+		# invalid ".../v1.0<token>" URL.
 		# NOTE: Normalize folder name for Graph API compatibility
 		normalizedFolder = NormalizeFolderName(folder)
 		endpoint = f"/users/{user_email}/mailFolders/{normalizedFolder}/messages/delta"
@@ -323,11 +326,12 @@ def get_calendar_events_delta(user_email, access_token, delta_token=None):
 	Returns:
 		dict: Response with events and delta link
 	"""
-	if delta_token:
-		# Use the delta token URL directly
+	if delta_token and delta_token.startswith("http"):
+		# Use the stored delta link URL directly
 		endpoint = delta_token
 	else:
-		# Initial delta query - returns all fields by default
+		# Initial delta query - returns all fields by default. Also self-heals if
+		# a corrupt non-URL token was stored rather than building an invalid URL.
 		endpoint = f"/users/{user_email}/calendar/events/delta"
 
 	return make_graph_request(endpoint, access_token)

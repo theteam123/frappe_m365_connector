@@ -232,8 +232,11 @@ def sync_folder_for_email_account(email_account, folder_name, access_token, sync
 				message=str(e)
 			)
 
-	# Save new delta token
-	new_delta_token = response.get("@odata.deltaLink", "").split("$deltatoken=")[-1] if "@odata.deltaLink" in response else None
+	# Save new delta token — store the FULL @odata.deltaLink URL (matching the
+	# calendar sync in event_sync.py). Storing only the bare $deltatoken value
+	# produces an invalid Graph URL like ".../v1.0<token>" on the next sync,
+	# which Microsoft rejects with "Invalid version" (400).
+	new_delta_token = response.get("@odata.deltaLink") or None
 	if new_delta_token:
 		delta_tokens[folder_name] = new_delta_token
 		email_account.db_set("m365_delta_tokens", json.dumps(delta_tokens), update_modified=False)
