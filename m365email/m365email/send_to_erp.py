@@ -497,12 +497,15 @@ def _CreateTask(assignee: str, subject: str, comment: str) -> tuple[str, str]:
 	if not assignee or not frappe.db.exists("User", assignee):
 		frappe.throw(_("Select a person to assign the task to."))
 
+	# Store the description as plain text: the ToDo description shows in plain
+	# fields (task title / edit box), so HTML-escaping it would surface literal
+	# entities like &apos;. Frappe sanitises this field when rendered as HTML.
 	description = comment or subject or _("Email filed from Outlook")
 	task = frappe.get_doc({
 		"doctype": "ToDo",
 		"allocated_to": assignee,
 		"assigned_by": frappe.session.user,
-		"description": frappe.utils.escape_html(description).replace("\n", "<br>"),
+		"description": description,
 		"priority": "Medium",
 		"status": "Open",
 	})
@@ -522,10 +525,18 @@ def _CreateContact(target_doctype: str, name: str, email: str) -> tuple[str, str
 	"""
 	if target_doctype != "Contact":
 		frappe.throw(_("Creating a new {0} is not supported.").format(_(target_doctype)))
+
+	emailAddress = (email or "").strip().lower()
+
+	# Reuse an existing contact with this email instead of creating a duplicate.
+	if emailAddress:
+		existingName = frappe.db.get_value("Contact Email", {"email_id": emailAddress}, "parent")
+		if existingName:
+			return ("Contact", existingName)
+
 	if not frappe.has_permission("Contact", "create"):
 		frappe.throw(_("You do not have permission to create a Contact."), frappe.PermissionError)
 
-	emailAddress = (email or "").strip()
 	displayName = (name or "").strip() or (emailAddress.split("@")[0] if emailAddress else "")
 	if not displayName:
 		frappe.throw(_("A name or email is required to create a contact."))
@@ -533,6 +544,7 @@ def _CreateContact(target_doctype: str, name: str, email: str) -> tuple[str, str
 	contact = frappe.get_doc({"doctype": "Contact", "first_name": displayName})
 	if emailAddress:
 		contact.append("email_ids", {"email_id": emailAddress, "is_primary": 1})
+		contact.email_id = emailAddress  # populate the shown field, not just the child row
 	contact.insert(ignore_permissions=True)
 	return ("Contact", contact.name)
 
