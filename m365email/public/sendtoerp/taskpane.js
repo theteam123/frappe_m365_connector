@@ -20,7 +20,8 @@ const MIN_SEARCH_CHARS = 1;
 const MSAL_CLIENT_ID = "d2a895aa-c239-4605-ac8e-d844341887fc";
 const MSAL_TENANT_ID = "85e4e8f4-774e-4a96-987f-bc1a3813d984";
 const MSAL_SCOPES = ["User.Read"];
-const SIGNIN_TIMEOUT_MS = 20000;
+const TOKEN_REFRESH_SKEW_MS = 120000;          // re-acquire a token this long before it expires
+const SIGNIN_DIALOG_SIZE = { height: 65, width: 40 };  // % of screen, for the web sign-in dialog
 
 // Environment badge. The panel is served same-origin with its ERP site, so the
 // host reliably identifies whether the user is filing to Production or Staging.
@@ -36,12 +37,38 @@ const state = {
 };
 
 
-// Microsoft 365 sign-on via Nested App Authentication. The Office host brokers
-// a token silently; the ID token is sent to ERP as a bearer token, which ERP
-// validates and maps to a Frappe user. No passwords, no manifest SSO wiring.
+// Microsoft 365 sign-on. On desktop Outlook the Office host brokers a token
+// silently via Nested App Authentication (NAA). In Outlook on the web the add-in
+// runs in an iframe where the Microsoft sign-in page is blocked, so NAA can't
+// complete; there we fall back to the Office dialog API (a standalone window that
+// can show the sign-in page) and receive the ID token via messageParent. The ID
+// token is sent to ERP as a bearer token, which ERP validates and maps to a user.
 const auth = {
 	pca: null,
 	account: null,
+
+	_isWeb() {
+		return Office.context.platform === Office.PlatformType.OfficeOnline;
+	},
+
+	// Per-request token: reuse the cached token until it nears expiry. Desktop can
+	// refresh silently; the web has no silent path, so it must sign in again.
+	async ensureToken() {
+		if (state.msToken && !isTokenExpired(state.msToken)) return state.msToken;
+		if (auth._isWeb()) throw new Error("Your sign-in has expired — please sign in again.");
+		return auth._acquireViaNaa();
+	},
+
+	// Interactive sign-in, triggered by a user gesture. Web uses the dialog;
+	// desktop uses NAA and falls back to the dialog if the broker is unavailable.
+	async signIn() {
+		if (auth._isWeb()) return auth._acquireViaDialog();
+		try {
+			return await auth._acquireViaNaa();
+		} catch (e) {
+			return auth._acquireViaDialog();
+		}
+	},
 
 	async _getApp() {
 		if (auth.pca) return auth.pca;
@@ -56,7 +83,7 @@ const auth = {
 		return auth.pca;
 	},
 
-	async getToken() {
+	async _acquireViaNaa() {
 		const pca = await auth._getApp();
 		const request = { scopes: MSAL_SCOPES };
 		if (auth.account) request.account = auth.account;
@@ -71,17 +98,58 @@ const auth = {
 		return result.idToken;
 	},
 
-	async signIn() {
-		// Guard against hosts where the broker never resolves (e.g. some web cases).
-		const timeout = new Promise((_, reject) =>
-			setTimeout(() => reject(new Error("Sign-in timed out — tap the button to try again.")), SIGNIN_TIMEOUT_MS));
-		return Promise.race([auth.getToken(), timeout]);
+	// Open the sign-in dialog (a standalone window) and resolve with its ID token.
+	_acquireViaDialog() {
+		return new Promise((resolve, reject) => {
+			const dialogUrl = new URL("dialog.html", window.location.href).href;
+			Office.context.ui.displayDialogAsync(dialogUrl, SIGNIN_DIALOG_SIZE, (openResult) => {
+				if (openResult.status !== Office.AsyncResultStatus.Succeeded) {
+					reject(new Error("Could not open the sign-in window."));
+					return;
+				}
+				const dialog = openResult.value;
+				dialog.addEventHandler(Office.EventType.DialogMessageReceived,
+					(arg) => handleDialogToken(arg, dialog, resolve, reject));
+				dialog.addEventHandler(Office.EventType.DialogEventReceived,
+					() => reject(new Error("Sign-in was cancelled.")));
+			});
+		});
 	},
 };
 
 
+// True if the JWT is missing, unreadable, or within the refresh skew of expiry.
+function isTokenExpired(token) {
+	try {
+		let base64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+		while (base64.length % 4) base64 += "=";
+		const claims = JSON.parse(atob(base64));
+		return Date.now() >= (claims.exp * 1000) - TOKEN_REFRESH_SKEW_MS;
+	} catch (e) {
+		return true;
+	}
+}
+
+
+// Handle the message posted back by the sign-in dialog: resolve with the ID
+// token, or reject with the reported error.
+function handleDialogToken(arg, dialog, resolve, reject) {
+	let payload = {};
+	try {
+		payload = JSON.parse(arg.message);
+	} catch (e) { /* leave payload empty -> treated as failure */ }
+	dialog.close();
+	if (payload.status === "ok" && payload.idToken) {
+		state.msToken = payload.idToken;
+		resolve(payload.idToken);
+	} else {
+		reject(new Error(payload.error || "Sign-in failed."));
+	}
+}
+
+
 async function apiGet(method, params) {
-	const token = await auth.getToken();
+	const token = await auth.ensureToken();
 	const qs = params ? "?" + new URLSearchParams(params).toString() : "";
 	const resp = await fetch(`${API_BASE}${method}${qs}`, { headers: { "Authorization": `Bearer ${token}` } });
 	if (!resp.ok) throw new Error(`${method} failed (${resp.status})`);
@@ -90,7 +158,7 @@ async function apiGet(method, params) {
 
 
 async function apiPost(method, params) {
-	const token = await auth.getToken();
+	const token = await auth.ensureToken();
 	const resp = await fetch(`${API_BASE}${method}`, {
 		method: "POST",
 		headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/x-www-form-urlencoded" },
@@ -351,5 +419,12 @@ applyEnvBadges();
 Office.onReady(async () => {
 	wireEvents();
 	show("loginView");
-	await doSignIn();
+	// The web sign-in dialog must be opened by a user gesture, so on the web we
+	// wait for the button. Desktop can start sign-in silently on load.
+	if (auth._isWeb()) {
+		$("loginStatus").textContent = "Sign in to continue.";
+		show("loginBtn");
+	} else {
+		await doSignIn();
+	}
 });
