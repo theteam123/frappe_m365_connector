@@ -211,11 +211,13 @@ def FileEmailToRecord(
 
 	frappe.db.commit()
 
+	# For a task, name the assignee in the message (not the new ToDo's id).
+	summaryName = target_name if isTask else recordName
 	return {
 		"success": True,
 		"communication": communicationName,
 		"files": createdFiles,
-		"message": _BuildSummary(isTask, shouldSaveEmail, createdFiles, recordDoctype, recordName, bool(commentText)),
+		"message": _BuildSummary(isTask, shouldSaveEmail, createdFiles, recordDoctype, summaryName, bool(commentText)),
 	}
 
 
