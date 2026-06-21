@@ -170,14 +170,18 @@ def FileEmailToRecord(
 	if not shouldSaveEmail and not attachmentList:
 		frappe.throw(_("Select the email and/or at least one attachment to file."))
 
+	# Attach files to the target record itself so they show in the record's
+	# standard attachments, and capture their URLs for the email body.
+	createdFiles = _AttachFiles(attachmentList, target_doctype, target_name)
+
+	# Save the email on the timeline, listing the attachments in its body so they
+	# are reachable directly beneath the email as well.
 	communicationName = None
 	if shouldSaveEmail:
 		communicationName = _CreateCommunication(
-			target_doctype, target_name, subject, sender, recipients, sent_date, body_html
+			target_doctype, target_name, subject, sender, recipients, sent_date,
+			_AppendAttachmentLinks(body_html, createdFiles),
 		)
-
-	attachParent = ("Communication", communicationName) if communicationName else (target_doctype, target_name)
-	createdFiles = _AttachFiles(attachmentList, attachParent[0], attachParent[1])
 
 	frappe.db.commit()
 
@@ -266,6 +270,28 @@ def _ParseAttachments(attachments: str) -> list[dict]:
 			frappe.throw(_("Attachment {0} is too large.").format(item.get("file_name", "")))
 
 	return parsed
+
+
+
+def _AppendAttachmentLinks(body_html: str, files: list[dict]) -> str:
+	"""Append a clickable list of the filed attachments to the email body.
+
+	The record timeline renders the Communication's HTML, so listing the files
+	here surfaces them directly beneath the email — in addition to their place in
+	the record's own attachments.
+	"""
+	if not files:
+		return body_html or ""
+
+	htmlItems = "".join(
+		'<li><a href="{0}">{1}</a></li>'.format(
+			frappe.utils.escape_html(file["file_url"]),
+			frappe.utils.escape_html(file["file_name"]),
+		)
+		for file in files
+	)
+	heading = _("Attachments filed to this record")
+	return (body_html or "") + "<hr><p><strong>{0}</strong></p><ul>{1}</ul>".format(heading, htmlItems)
 
 
 
