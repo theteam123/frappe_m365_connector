@@ -71,54 +71,54 @@ You'll need:
 4. Click **Save**
 5. Click **Test Connection** to verify credentials
 
-### 2. Enable Email Sync for Users
+### 2. Configure Email Accounts
+
+M365 mailboxes are configured on Frappe's standard **Email Account** doctype with
+**Service = "M365"** (this app extends Email Account; there is no separate "M365 Email
+Account" doctype). The M365-specific fields appear once Service is set to M365.
 
 #### For User Mailboxes:
 
-Users can enable their own mailbox sync:
-
-1. Go to **M365 Email Account**
+1. Go to **Email Account**
 2. Click **New**
 3. Fill in:
-   - **Account Name**: Unique name (e.g., "john-doe-email")
-   - **Account Type**: User Mailbox
+   - **Service**: M365
    - **Email Address**: User's M365 email
-   - **User**: Select the Frappe user
-   - **Service Principal**: Select the service principal
-   - **Enabled**: Check this box
-4. Configure folder filters (Inbox, Sent Items, etc.)
+   - **Linked User**: The Frappe user who owns this mailbox (controls who can view its synced emails)
+   - **M365 Service Principal**: Select the service principal
+   - **M365 Account Type**: User Mailbox
+   - **Enable Incoming**: Check to sync mail
+4. Configure folder filters (Inbox, Sent Items, etc.) and the **Sync From Date**
 5. Click **Save**
 
 #### For Shared Mailboxes (System Manager only):
 
-1. Go to **M365 Email Account**
+1. Go to **Email Account**
 2. Click **New**
 3. Fill in:
-   - **Account Name**: Unique name (e.g., "support-mailbox")
-   - **Account Type**: Shared Mailbox
+   - **Service**: M365
    - **Email Address**: Shared mailbox email (e.g., support@company.com)
-   - **User**: Select yourself or another admin
-   - **Service Principal**: Select the service principal
-   - **Enabled**: Check this box
+   - **Linked User**: An admin who has access to the shared mailbox in M365
+   - **M365 Service Principal**: Select the service principal
+   - **M365 Account Type**: Shared Mailbox
+   - **Enable Incoming**: Check to sync mail
 4. Configure folder filters
 5. Click **Save**
 
-### 3. Grant Access to Shared Mailbox Emails
+### 3. Grant Access to Synced Emails
 
-For team members to access shared mailbox emails:
-
-1. Go to **Role Permission Manager**
-2. Find the **Inbox User** role
-3. Assign this role to users who need access to shared mailbox emails
-4. Users with Inbox User role can view all Communications (including shared mailbox emails)
+Synced emails are stored as **Communication** records owned by the account's **Linked User**.
+This app filters Communications so users only see emails from accounts linked to them
+(via `permission_query_conditions` on Communication). To let another user view a mailbox's
+emails, set them as the **Linked User**, or grant a role with broad Communication read access.
 
 ## Scheduled Tasks
 
 The following tasks run automatically:
 
-- **Every 5 minutes**: Sync all enabled email accounts
+- **Every minute** (scheduler cron): Sync all enabled email accounts and calendars. Each Service Principal is throttled to its own interval (default 5 minutes), so a mailbox is not actually polled every minute.
 - **Hourly**: Refresh access tokens for all service principals
-- **Daily**: 
+- **Daily**:
   - Cleanup old sync logs (older than 30 days)
   - Validate service principal credentials
 
@@ -158,7 +158,7 @@ Available whitelisted API endpoints:
 
 ### Emails Not Appearing
 
-1. Check if user has **Inbox User** role (for shared mailboxes)
+1. Confirm you are signed in as the account's **Linked User** (Communications are filtered per linked user)
 2. Verify folder filters are configured correctly
 3. Check **Communication** list for synced emails
 4. Review **M365 Email Sync Log** for sync statistics

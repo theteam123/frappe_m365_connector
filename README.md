@@ -11,7 +11,7 @@ A comprehensive Frappe app that integrates Microsoft 365 email using Azure AD Se
 - ✅ **Folder Filtering** - Choose which folders to sync (Inbox, Sent Items, etc.)
 - ✅ **Automatic Deduplication** - Prevents duplicate emails using Message-ID
 - ✅ **Attachment Support** - Downloads and stores email attachments
-- ✅ **Scheduled Sync** - Automatic syncing every 5 minutes
+- ✅ **Scheduled Sync** - Scheduler runs every minute; each Service Principal syncs on its own configured interval (default 5 minutes)
 - ✅ **Manual Sync** - Trigger sync on-demand via API
 - ✅ **Calendar Event Sync** - Sync M365 calendar events to Frappe Events
 
@@ -38,7 +38,8 @@ This app extends Frappe's standard **Email Account** doctype by adding `M365` as
 #### Email Syncing Flow
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ 1. Scheduled Task (Every 5 minutes)                             │
+│ 1. Scheduled Task (runs every minute; throttled per Service      │
+│    Principal interval, default 5 minutes)                        │
 │    └─> m365email.m365email.tasks.sync_all_email_accounts()     │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
@@ -110,14 +111,15 @@ The standard Frappe Email Account doctype is extended with M365 support via cust
 
 **M365 Custom Fields Added:**
 - `service` - Select field with 'M365' option (added via Property Setter)
+- `linked_user` - Frappe user who owns this account (controls who can view its synced emails)
 - `m365_service_principal` - Link to Service Principal Settings
 - `m365_account_type` - User Mailbox or Shared Mailbox
 - `m365_sync_events` - Enable/disable calendar event syncing
 - `m365_sync_attachments` - Enable/disable attachment downloads
-- `m365_initial_sync_days` - Days of history to sync on first run
-- `m365_delta_token` - Stores delta sync state
-- `m365_calendar_delta_token` - Stores calendar sync state
+- `m365_sync_from_date` - Date to start syncing history from
+- `m365_delta_tokens` - JSON store of per-folder delta sync state
 - `m365_folder_filter` - Child table of folders to sync
+- `m365_last_sync_time`, `m365_last_sync_status`, `m365_sync_error_message` - Sync status fields
 
 **Note:** Shared mailbox access is managed via Frappe's standard User Email table (on User doctype), not custom roles.
 
@@ -147,10 +149,13 @@ Tracks sync operations and errors.
 
 **Fields:**
 - `email_account` - Link to Email Account
-- `sync_type` - Manual or Scheduled
-- `status` - Success, Failed, or Partial
-- `messages_synced` - Count of messages synced
-- `error_message` - Error details if failed
+- `sync_type` - Manual, Scheduled, or Initial
+- `status` - Success, Failed, or Partial Success
+- `start_time`, `end_time`, `duration` - Timing of the sync run
+- `messages_fetched`, `messages_created`, `messages_updated`, `messages_failed` - Per-run counts
+- `error_message` / `details` - Error details if failed
+
+Naming: `SYNC-LOG-{#####}`
 
 ### Core Modules
 
@@ -159,17 +164,17 @@ Tracks sync operations and errors.
 - Token caching with encryption
 
 #### `graph_api.py` - Microsoft Graph API
-- `get_delta_messages(email_address, delta_link, access_token)` - Incremental sync
-- `send_email_as_user(sender_email, recipients, subject, body, ...)` - Send email
-- `make_graph_request(endpoint, access_token, method, data)` - Generic API wrapper
+- `make_graph_request(endpoint, access_token, method, data, params)` - Generic API wrapper (handles delta queries, pagination, rate limiting)
+- `send_email_as_user(sender_email, recipients, subject, body, access_token, ...)` - Send email
 
 #### `sync.py` - Email Syncing
-- `sync_m365_email_account(email_account_name)` - Sync a single account
+- `sync_email_account(email_account_name)` - Sync a single account
 - `create_communication_from_message_for_email_account()` - Process emails
-- Delta token management for incremental sync
+- Delta token management for incremental sync (stores the full `@odata.deltaLink` URL per folder)
 
 #### `send.py` - Email Sending
-- `get_m365_outgoing_account(sender)` - Find M365 account for sender
+- `get_sending_account_for_sender(sender_email)` - Find M365 account for a sender
+- `GetUserDefaultEmailAccount(user)` - Find a user's default outgoing account (via `linked_user`)
 - `intercept_email_queue(doc, method)` - Hook to mark emails for M365
 - `send_via_m365(email_queue_doc)` - Send email via Graph API
 - `M365SendContext` - Helper class for building personalized M365 emails
@@ -193,17 +198,20 @@ Tracks sync operations and errors.
 - Applied during installation via `after_migrate` hook
 
 #### `tasks.py` - Scheduled Tasks
-- `sync_all_email_accounts()` - Sync all enabled accounts (every 5 min)
-- `refresh_all_service_principal_tokens()` - Refresh tokens (hourly)
-- `cleanup_old_sync_logs()` - Delete old logs (daily)
+- `sync_all_email_accounts()` - Sync all enabled accounts (scheduler runs every minute; per-SP interval throttling)
+- `sync_all_calendar_events()` - Sync all enabled calendars (same schedule)
+- `refresh_all_tokens()` - Refresh tokens (hourly)
+- `cleanup_old_logs()` - Delete old logs (daily)
 - `validate_service_principals()` - Check credentials (daily)
 
 #### `api.py` - Whitelisted API Endpoints
-- `enable_email_sync()` - Enable sync for an account
+- `enable_email_sync()` - Create / enable an M365 Email Account
 - `disable_email_sync()` - Disable sync
-- `trigger_manual_sync()` - Manual sync trigger
+- `trigger_manual_sync()` - Manual email sync trigger
+- `trigger_manual_event_sync()` - Manual calendar sync trigger
 - `get_sync_status()` - Get sync statistics
 - `test_service_principal_connection()` - Test credentials
+- `get_available_service_principals()`, `get_shared_mailboxes()`, `get_available_folders()`, `update_folder_filters()`, `SendEmailQueueNow()`
 
 ### Hooks Configuration
 
@@ -223,17 +231,37 @@ doc_events = {
     }
 }
 
-# Apply custom fields after migration
-after_migrate = [
-    "m365email.m365email.custom_fields.setup_custom_fields"
+# Route Frappe's core email.make through M365 when applicable
+override_whitelisted_methods = {
+    "frappe.core.doctype.communication.email.make": "m365email.m365email.email_override.make"
+}
+
+# Filter Communications so users only see emails from their linked accounts
+permission_query_conditions = {
+    "Communication": "m365email.m365email.permissions.get_communication_permission_query_conditions"
+}
+has_permission = {
+    "M365 Email Account": "m365email.m365email.doctype.m365_email_account.m365_email_account.has_permission",
+    "Communication": "m365email.m365email.permissions.has_communication_permission"
+}
+
+# Validate Microsoft 365 tokens for the Send-to-ERP Outlook add-in
+auth_hooks = [
+    "m365email.m365email.addin_sso.ValidateAddinToken"
 ]
+
+# Apply custom fields after install and after migration
+after_install = "m365email.m365email.custom_fields.create_m365_custom_fields"
+after_migrate = "m365email.m365email.custom_fields.create_m365_custom_fields"
 
 # Scheduled tasks
 # Note: M365 email sending is handled by Frappe's standard queue processing
 # via our M365EmailQueue.send() override - no separate task needed
 scheduler_events = {
     "cron": {
-        "*/5 * * * *": [  # Every 5 minutes
+        # Scheduler fires every minute; each task throttles per Service
+        # Principal interval (default 5 minutes)
+        "* * * * *": [
             "m365email.m365email.tasks.sync_all_email_accounts",
             "m365email.m365email.tasks.sync_all_calendar_events"
         ]
@@ -242,7 +270,8 @@ scheduler_events = {
         "m365email.m365email.tasks.refresh_all_tokens"
     ],
     "daily": [
-        "m365email.m365email.tasks.cleanup_old_sync_logs"
+        "m365email.m365email.tasks.cleanup_old_logs",
+        "m365email.m365email.tasks.validate_service_principals"
     ]
 }
 ```
@@ -357,10 +386,10 @@ check_recent_errors()
 ### Manual Sync
 
 ```python
-from m365email.m365email.sync import sync_m365_email_account
+from m365email.m365email.sync import sync_email_account
 
 # Sync a specific Email Account (with service='M365')
-sync_m365_email_account("Your Email Account Name")
+sync_email_account("Your Email Account Name")
 ```
 
 ## 📊 Monitoring

@@ -10,10 +10,10 @@ The M365 Email app can send emails via Microsoft Graph API instead of SMTP. This
 
 ## How It Works
 
-1. **One Account for Sending**: You mark one M365 Email Account as "Use for Sending"
+1. **M365 Email Accounts**: Sending uses the standard **Email Account** doctype with Service = "M365" and **Enable Outgoing** checked. Mark one as **Default Outgoing** to act as the fallback sender.
 2. **Send As Any User**: The Service Principal has `Mail.Send` permission to send as any user
-3. **Automatic Interception**: When Frappe creates an Email Queue entry, it's automatically marked for M365 sending
-4. **Graph API Sending**: A scheduled task processes the queue and sends via Microsoft Graph API
+3. **Automatic Interception**: When Frappe creates an Email Queue entry, the `before_insert` hook marks it for M365 sending (`m365_send = 1`)
+4. **Graph API Sending**: Frappe's standard email queue processing calls our `M365EmailQueue.send()` override, which sends via Microsoft Graph API instead of SMTP. There is no separate sending task.
 
 ## Azure AD Setup
 
@@ -60,14 +60,16 @@ Or if running in development mode, stop and restart:
 bench start
 ```
 
-### 3. Mark Account for Sending
+### 3. Configure an Account for Sending
 
-1. Go to **M365 Email Account** list
-2. Open the account you want to use for sending (usually a shared mailbox or admin account)
-3. Check **"Use for Sending"**
-4. Save
+1. Go to **Email Account** list
+2. Open (or create) the M365 account you want to send from (Service = "M365")
+3. Check **Enable Outgoing**
+4. Optionally check **Default Outgoing** to make it the fallback sender for emails whose sender does not match another M365 account
+5. Set **Linked User** if this should be a specific user's default outgoing account
+6. Save
 
-**Note**: Only ONE account can be marked for sending at a time.
+**Note**: Multiple M365 accounts can send. The account is chosen per sender (matching sender email or the sender's linked account), falling back to the Default Outgoing M365 account.
 
 ### 4. Test Sending
 
@@ -85,7 +87,7 @@ frappe.sendmail(
 
 Check the Email Queue:
 - The email should have `m365_send = 1`
-- It should be processed within 1 minute (scheduled task runs every minute)
+- It is processed by Frappe's standard email queue flush (our `M365EmailQueue.send()` override)
 - Status should change to "Sent"
 
 ## How Sending Works
@@ -101,7 +103,7 @@ before_insert hook checks for M365 sending account
     ↓
 If found: Mark email with m365_send=1
     ↓
-Scheduled task (every minute) processes queue
+Frappe's standard email queue flush calls M365EmailQueue.send()
     ↓
 Get access token from Service Principal
     ↓
@@ -179,7 +181,7 @@ print(result)  # {'sent': 5, 'failed': 0}
 **Problem**: Email Queue entries have `m365_send = 0`
 
 **Solution**:
-1. Check that you have an M365 Email Account with `use_for_sending = 1` and `enabled = 1`
+1. Check that you have an Email Account with Service = "M365", `enable_outgoing = 1`, and (for fallback) `default_outgoing = 1`
 2. Restart bench after making changes to hooks.py
 
 ### Email Stuck in "Sending" Status
@@ -217,11 +219,11 @@ print(result)  # {'sent': 5, 'failed': 0}
 
 To temporarily disable M365 sending without removing the configuration:
 
-1. Open the M365 Email Account marked for sending
-2. Uncheck **"Use for Sending"**
+1. Open the M365 Email Account used for sending
+2. Uncheck **Enable Outgoing** (and **Default Outgoing**)
 3. Save
 
-All new emails will use SMTP instead.
+New emails will then fall back to Frappe's standard (SMTP) sending.
 
 ### Fallback to SMTP
 
@@ -235,7 +237,7 @@ If you want to retry via SMTP:
 
 ## Performance
 
-- **Processing**: Every minute, up to 100 emails are processed
+- **Processing**: Emails are sent as part of Frappe's standard email queue flush (no separate M365 sending schedule)
 - **Rate Limiting**: Microsoft Graph API has rate limits (handled automatically with retries)
 - **Attachments**: Supported up to Microsoft's limits (typically 150 MB total message size)
 
