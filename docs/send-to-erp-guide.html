@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Send to ERP — Outlook Add-in Guide</title>
+<title>Send to ERP: Outlook Add-in Guide</title>
 <style>
   :root{
     --brand:#2563eb; --brand-dark:#1e3a8a; --ink:#0f172a; --body:#334155;
@@ -99,12 +99,12 @@
   <header class="cover">
     <div class="kicker">Outlook Add-in · User &amp; Admin Guide</div>
     <h1>Send to ERP</h1>
-    <p class="tag">File an email and its attachments straight onto an ERP record — from inside Outlook, in a few clicks.</p>
+    <p class="tag">File an email and its attachments straight onto an ERP record, from inside Outlook, in a few clicks.</p>
     <div class="meta">
-      <span>Production · ops.sgcloud.com.au</span>
+      <span>Production environment</span>
       <span>Sign-in: Microsoft 365</span>
-      <span>Version 1.0.3</span>
-      <span>Updated 21 Jun 2026</span>
+      <span>Version 1.0.4</span>
+      <span>Updated 24 Jun 2026</span>
     </div>
   </header>
 
@@ -120,12 +120,13 @@
     <h2><span class="num">1.</span>What it does</h2>
     <div class="figrow">
       <div class="txt">
-        <p>From an open email you choose what to keep — the message itself and/or
-        individual attachments — search for the record to file it against, and click
-        <strong>Attach to ERP</strong>. The result:</p>
+        <p>From an open email you choose what to keep (the message itself and/or
+        individual attachments), optionally add a short note, search for the record to file it
+        against, and click <strong>Attach to ERP</strong>. The result:</p>
         <ul>
           <li>The <strong>email</strong> is saved to the record's <em>timeline</em> (as a Communication).</li>
           <li>Each chosen <strong>attachment</strong> is saved as a <em>File</em> on the record.</li>
+          <li>Any <strong>note</strong> you add is posted as a timeline comment on the record.</li>
         </ul>
         <p>You can file against any of these record types:</p>
         <p>
@@ -136,6 +137,9 @@
           <span class="badge prod" style="background:#eef2ff;color:#3730a3">Sales Invoice</span>
           <span class="badge prod" style="background:#eef2ff;color:#3730a3">Purchase Invoice</span>
         </p>
+        <p>Or choose <strong>Task / To-Do</strong>: instead of an existing record, pick a person and a
+        new task is created for them, with the email filed against it (and your note becomes the task's
+        description).</p>
         <p>You only ever see records you already have permission to open in ERP.</p>
       </div>
       <figure>
@@ -145,40 +149,45 @@
     </div>
 
     <!-- 2 -->
-    <h2><span class="num">2.</span>Quick start — install it <span style="font-size:15px;font-weight:600;color:var(--muted)">(admin, one-time)</span></h2>
+    <h2><span class="num">2.</span>Quick start: install it <span style="font-size:15px;font-weight:600;color:var(--muted)">(admin, one-time)</span></h2>
     <p>Installation is done once by a Microsoft 365 administrator, in two parts.</p>
+    <div class="callout tip">
+      <span class="lbl">Before you start</span>
+      Replace <code>&lt;your-erp-host&gt;</code> below with your live ERP site's hostname, and use your own
+      Azure app registration (its client ID is in the add-in manifest, under <code>WebApplicationInfo</code>).
+    </div>
 
-    <h3>Part A — Azure (one-time)</h3>
+    <h3>Part A: Azure (one-time)</h3>
     <p>The add-in signs people in with Microsoft 365, so Microsoft needs to know the allowed return addresses.</p>
     <ol class="tight">
       <li>Azure portal → <strong>Microsoft Entra ID → App registrations</strong>.</li>
-      <li>Open <strong>“SGC Australia Helpdesk”</strong> (client ID <code>d2a895aa-c239-4605-ac8e-d844341887fc</code>).</li>
+      <li>Open the add-in's <strong>app registration</strong> (the one whose client ID is in the add-in manifest).</li>
       <li>Left menu → <strong>Authentication</strong>.</li>
       <li>Under the <strong>Single-page application</strong> platform, ensure these three redirect URIs exist, then <strong>Save</strong>:
         <ul>
-          <li><code>brk-multihub://ops.sgcloud.com.au</code></li>
-          <li><code>https://ops.sgcloud.com.au/assets/m365email/sendtoerp/taskpane.html</code></li>
-          <li><code>https://ops.sgcloud.com.au/assets/m365email/sendtoerp/dialog.html</code></li>
+          <li><code>brk-multihub://&lt;your-erp-host&gt;</code></li>
+          <li><code>https://&lt;your-erp-host&gt;/assets/m365email/sendtoerp/taskpane.html</code></li>
+          <li><code>https://&lt;your-erp-host&gt;/assets/m365email/sendtoerp/dialog.html</code></li>
         </ul>
       </li>
     </ol>
 
-    <h3>Part B — Upload the add-in</h3>
+    <h3>Part B: Upload the add-in</h3>
     <ol class="tight">
-      <li>Download the package: <code>https://ops.sgcloud.com.au/assets/m365email/sendtoerp/sendtoerp-prod.zip</code></li>
+      <li>Download the package: <code>https://&lt;your-erp-host&gt;/assets/m365email/sendtoerp/sendtoerp-prod.zip</code></li>
       <li>Microsoft 365 admin centre → <strong>Settings → Integrated apps</strong>.</li>
       <li><strong>Upload custom apps</strong> (first time), or open <strong>“Send to ERP”</strong> → <strong>Update file</strong> (to deploy a new version).</li>
       <li>Select the <code>.zip</code>, choose who gets it (<strong>Just me</strong> for a pilot, or specific groups / everyone), accept and finish.</li>
     </ol>
     <div class="callout tip">
-      <span class="lbl">Tip — avoid “upload failed”</span>
+      <span class="lbl">Tip: avoid “upload failed”</span>
       The server caches files for a long time, so a previously-downloaded copy can be stale.
-      If an upload is rejected with “check the manifest”, re-download with a cache-buster —
-      add <code>?v=</code> and any number, e.g. <code>…/sendtoerp-prod.zip?v=103</code> — and upload that fresh file.
+      If an upload is rejected with “check the manifest”, re-download with a cache-buster,
+      add <code>?v=</code> and any number, e.g. <code>…/sendtoerp-prod.zip?v=103</code>, and upload that fresh file.
     </div>
     <div class="callout warn">
       <span class="lbl">Give it time</span>
-      The button can take minutes (occasionally hours) to appear — the <strong>desktop</strong> app is slowest, the
+      The button can take minutes (occasionally hours) to appear, the <strong>desktop</strong> app is slowest, the
       <strong>web</strong> client fastest. Have users fully quit and reopen Outlook once it's deployed.
     </div>
 
@@ -199,13 +208,13 @@
       <div class="txt">
         <h4>Check the badge, then sign in</h4>
         <p>At the top of the panel, confirm the tag reads <span class="badge prod">Production</span>
-        — the live system. If you see <span class="badge stg">Staging</span> (the test system), close it and
+        , the live system. If you see <span class="badge stg">Staging</span> (the test system), close it and
         use the other <strong>Send to ERP</strong> button.</p>
-        <p>Sign in with <strong>Microsoft 365</strong> — automatic on desktop; on the web a small
+        <p>Sign in with <strong>Microsoft 365</strong>, automatic on desktop; on the web a small
         sign-in window pops up. No ERP password is needed.</p>
         <figure>
           <img src="send-to-erp-guide-assets/01-signin.png" alt="Sign-in screen with Production badge" />
-          <figcaption>The sign-in screen — note the green <strong>PRODUCTION</strong> badge.</figcaption>
+          <figcaption>The sign-in screen, note the green <strong>PRODUCTION</strong> badge.</figcaption>
         </figure>
       </div>
     </div>
@@ -215,7 +224,8 @@
       <div class="txt">
         <h4>Choose what to file</h4>
         <p>Under <strong>What to file</strong>, tick <strong>The email itself</strong> and/or any
-        attachments you want to keep.</p>
+        attachments you want to keep. You can also type a short <strong>note</strong> in the comment box;
+        it is posted as a timeline comment (or becomes the description when you create a Task/To-Do).</p>
       </div>
     </div>
 
@@ -226,9 +236,12 @@
         <p>Under <strong>Where to file it</strong>, pick a <strong>Type</strong>, then start typing in
         <strong>Find record</strong>. Click the record you want. For contacts, the email address shows
         beneath the name, so two people with the same name are easy to tell apart.</p>
+        <p>To create a task instead, choose <strong>Task / To-Do</strong> as the Type and pick the
+        <strong>person</strong> to assign it to. A new task is created for them and the email is filed
+        against it.</p>
         <figure>
           <img src="send-to-erp-guide-assets/03-search-emails.png" alt="Searching contacts with emails shown" />
-          <figcaption>Contact search — emails appear under each name to disambiguate.</figcaption>
+          <figcaption>Contact search: emails appear under each name to disambiguate.</figcaption>
         </figure>
       </div>
     </div>
@@ -251,7 +264,7 @@
     <div class="grid">
       <div class="card">
         <h4>The panel</h4>
-        <p>A small web page served by ERP itself — same-origin with your data, no separate web server.</p>
+        <p>A small web page served by ERP itself, same-origin with your data, no separate web server.</p>
       </div>
       <div class="card">
         <h4>Sign-in</h4>
@@ -260,7 +273,7 @@
       </div>
       <div class="card">
         <h4>Permissions</h4>
-        <p>Normal ERP permissions apply — you can only file against records you're allowed to edit.</p>
+        <p>Normal ERP permissions apply, you can only file against records you're allowed to edit.</p>
       </div>
       <div class="card">
         <h4>Where it lives</h4>
@@ -276,7 +289,7 @@
       <tr><td>Button doesn't appear in Outlook</td><td>Deployment still propagating; desktop is slow</td><td>Wait, then fully quit &amp; reopen Outlook. Admin: check it shows <strong>OK</strong> in Integrated apps.</td></tr>
       <tr><td>Two “Send to ERP” buttons, or it filed somewhere you can't find</td><td>You used the <strong>Staging</strong> one</td><td>Use the button whose badge says <span class="badge prod">Production</span>.</td></tr>
       <tr><td>“Couldn't sign in” on the web; no sign-in window</td><td>Dialog redirect missing in Azure</td><td>Admin: add <code>…/dialog.html</code> under Single-page application (Part A).</td></tr>
-      <tr><td>“Elevated permission is required… body.getAsync”</td><td>Old add-in version</td><td>Admin: update to package <strong>v1.0.3</strong> or later.</td></tr>
+      <tr><td>“Elevated permission is required… body.getAsync”</td><td>Old add-in version</td><td>Admin: update to package <strong>v1.0.4</strong> or later.</td></tr>
       <tr><td>Admin “upload failed / check the manifest”</td><td>A stale cached <code>.zip</code> was uploaded</td><td>Re-download with a <code>?v=</code> cache-buster and upload the fresh file.</td></tr>
       <tr><td>“Your Microsoft account isn't linked to an ERP user”</td><td>Your Microsoft email doesn't match an enabled ERP user</td><td>Admin: ensure the user exists and is enabled in ERP with the same email.</td></tr>
     </table>
@@ -291,7 +304,7 @@
       <li><strong>For IT, before full rollout:</strong> set production's web server to not cache the add-in files, so updates reach users immediately (and the <code>?v=</code> workaround is no longer needed).</li>
     </ul>
 
-    <p class="footer">Send to ERP — Outlook add-in - part of the <code>m365email</code> app -
+    <p class="footer">Send to ERP: Outlook add-in, part of the <code>m365email</code> app.
     Questions or issues: contact your ERP administrator.</p>
 
   </main>
