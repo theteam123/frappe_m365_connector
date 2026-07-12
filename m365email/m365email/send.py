@@ -441,7 +441,7 @@ class M365SendContext:
 
 		if footer:
 			footer_html = f"""
-<div class="m365-email-footer" style="margin-top: 20px; padding-top: 10px; border-top: 1px solid #e0e0e0;">
+<div class="m365-email-footer" style="margin-top: 12px;">
 {footer}
 </div>
 """
