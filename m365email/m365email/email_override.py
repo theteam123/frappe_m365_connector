@@ -192,7 +192,38 @@ def _make(
 			now=now,
 		)
 
+		# User-initiated sends should deliver immediately, not wait for the
+		# scheduled queue flush. Scheduled (send_after) emails stay queued.
+		if not now and not send_after:
+			frappe.enqueue(
+				"m365email.m365email.email_override.FlushCommunicationEmailQueue",
+				queue="short",
+				enqueue_after_commit=True,
+				communicationName=comm.name,
+			)
+
 	emails_not_sent_to = comm.exclude_emails_list(include_sender=send_me_a_copy)
 
 	return {"name": comm.name, "emails_not_sent_to": ", ".join(emails_not_sent_to)}
+
+
+def FlushCommunicationEmailQueue(communicationName: str) -> None:
+	"""Send a communication's queued emails now instead of at the next scheduled flush."""
+	queuedNames = frappe.get_all(
+		"Email Queue",
+		filters={"communication": communicationName, "status": "Not Sent"},
+		pluck="name",
+	)
+	for queuedName in queuedNames:
+		queuedDoc = frappe.get_doc("Email Queue", queuedName)
+		# Re-check under this job in case the scheduled flush got there first.
+		if queuedDoc.status != "Not Sent":
+			continue
+		try:
+			queuedDoc.send()
+		except Exception:
+			frappe.log_error(
+				title=f"Instant email send failed: {queuedName}",
+				message=frappe.get_traceback(),
+			)
 
