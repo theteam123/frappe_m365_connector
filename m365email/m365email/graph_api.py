@@ -6,6 +6,7 @@ Microsoft Graph API integration module
 Handles all Graph API requests for M365 Email Integration
 """
 
+import base64
 import requests
 import frappe
 from frappe import _
@@ -485,6 +486,65 @@ def MoveMessageSafe(
 			"data": None
 		}
 
+
+
+def send_mime_as_user(sender_email, mime_message, access_token):
+	"""
+	Send an already-built MIME message unchanged via Microsoft Graph.
+
+	Graph reads the recipients off the message headers, so the headers ARE the
+	envelope — there is no second recipient list that can disagree with them.
+
+	Args:
+		sender_email: Mailbox to send from (must match the From header)
+		mime_message: Complete RFC 822 message as bytes
+		access_token: Access token with Mail.Send permission
+
+	Returns:
+		dict: {"success": bool, "message": str}
+	"""
+	endpoint = f"https://graph.microsoft.com/v1.0/users/{sender_email}/sendMail"
+	headers = {
+		"Authorization": f"Bearer {access_token}",
+		"Content-Type": "text/plain"
+	}
+
+	try:
+		response = requests.post(
+			url=endpoint,
+			headers=headers,
+			data=base64.b64encode(mime_message),
+			timeout=60
+		)
+
+		if response.status_code == 429:
+			time.sleep(int(response.headers.get("Retry-After", 60)))
+			return send_mime_as_user(sender_email, mime_message, access_token)
+
+		if response.status_code >= 400:
+			frappe.log_error(
+				title=f"M365 Graph MIME Send Error: {response.status_code}",
+				message=f"Sender: {sender_email}\nResponse: {response.text}"
+			)
+			return {
+				"success": False,
+				"message": response.text
+			}
+
+		return {
+			"success": True,
+			"message": "Email sent successfully"
+		}
+
+	except requests.exceptions.RequestException as e:
+		frappe.log_error(
+			title="M365 Graph MIME Send Failed",
+			message=f"Sender: {sender_email}\nError: {str(e)}"
+		)
+		return {
+			"success": False,
+			"message": str(e)
+		}
 
 
 def send_email_as_user(sender_email, recipients, subject, body, access_token, cc=None, bcc=None, attachments=None, is_html=True):

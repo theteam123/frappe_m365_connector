@@ -8,9 +8,11 @@ Handles sending emails via Microsoft Graph API instead of SMTP
 
 import frappe
 from frappe import _
-import base64
+from email import message_from_bytes, policy
+from email.utils import parseaddr
+from frappe.email.doctype.email_queue.email_queue import SendMailContext
 from m365email.m365email.auth import get_access_token
-from m365email.m365email.graph_api import send_email_as_user
+from m365email.m365email.graph_api import send_mime_as_user
 
 
 def auto_provision_m365_account(sender_email):
@@ -242,11 +244,16 @@ def intercept_email_queue(doc, method=None):
 
 def send_via_m365(email_queue_doc):
 	"""
-	Send emails via M365 Graph API to each recipient individually
-	This mimics Frappe's standard Email Queue behavior:
-	- Sends separate email to each recipient (privacy)
-	- Personalizes message with unsubscribe links, tracking, etc.
-	- Updates individual recipient status
+	Send an Email Queue entry via Graph, one message per recipient.
+
+	The message itself is built by frappe's own SendMailContext, exactly as it
+	would be for SMTP, so attachments, inline images, unsubscribe links, tracking
+	and threading headers all come from core rather than being reassembled here.
+
+	Graph takes the recipients from the message headers, and core writes a single
+	recipient into those headers (see EMail.make), so CC addresses can only
+	ever be delivered by their own pass through this loop — never as a copy on
+	someone else's.
 
 	Args:
 		email_queue_doc: Email Queue document
@@ -277,8 +284,15 @@ def send_via_m365(email_queue_doc):
 			)
 			return False
 
-		# Create M365 send context helper
-		ctx = M365SendContext(email_queue_doc, sending_account, access_token)
+		sender_mailbox = sending_account.email_id
+
+		# Core's context builds the message; only delivery differs here. Not used
+		# as a context manager — M365EmailQueue.send() owns the queue status.
+		ctx = SendMailContext(email_queue_doc)
+		ctx.email_account_doc = sending_account
+
+		if email_queue_doc.expose_recipients == "header":
+			return send_single_mime_to_all(email_queue_doc, ctx, sender_mailbox, access_token)
 
 		# Track if we sent to at least one recipient
 		sent_to_at_least_one = False
@@ -290,15 +304,17 @@ def send_via_m365(email_queue_doc):
 				continue
 
 			try:
-				# Send to this recipient
-				if ctx.send_to_recipient(recipient):
+				mime_message = build_mime_for_recipient(ctx, recipient.recipient, sender_mailbox)
+				result = send_mime_as_user(sender_mailbox, mime_message, access_token)
+
+				if result.get("success"):
 					# Update recipient status
 					recipient.update_db(status="Sent", commit=True)
 					sent_to_at_least_one = True
 					print(f"M365 Email: Sent to {recipient.recipient}")
 				else:
 					# Mark as error
-					recipient.update_db(status="Not Sent", error="Failed to send via M365", commit=True)
+					recipient.update_db(status="Not Sent", error=result.get("message"), commit=True)
 					print(f"M365 Email: Failed to send to {recipient.recipient}")
 			except Exception as e:
 				# Log error for this recipient but continue with others
@@ -325,250 +341,62 @@ def send_via_m365(email_queue_doc):
 		return False
 
 
-class M365SendContext:
+def build_mime_for_recipient(ctx, recipient_email, sender_mailbox):
 	"""
-	Helper class for building and sending personalized M365 emails
-	Similar to Frappe's SendMailContext but for M365 Graph API
+	Build frappe's per-recipient message, addressed to the sending mailbox.
+
+	Core writes this one recipient into the To header and no CC header at all
+	(show_as_cc is a display list, not an address list), so the envelope Graph
+	derives from the headers is exactly this recipient.
 	"""
+	mime_message = ctx.build_message(recipient_email)
+	return apply_sending_mailbox(mime_message, sender_mailbox)
 
-	def __init__(self, queue_doc, sending_account, access_token):
-		self.queue_doc = queue_doc
-		self.sending_account = sending_account
-		self.access_token = access_token
 
-		# Get account email address
-		self.account_email = sending_account.email_id
+def apply_sending_mailbox(mime_message, sender_mailbox):
+	"""
+	Pin the From header to the mailbox Graph is sending as, which Graph requires.
+	Reply-To is left as frappe set it so replies still reach the real author.
+	"""
+	message_object = message_from_bytes(mime_message, policy=policy.SMTP)
+	current_sender = parseaddr(message_object.get("From", ""))[1]
 
-		# Parse the base MIME message once
-		import email
-		from email import policy
-		self.msg = email.message_from_string(queue_doc.message, policy=policy.default)
-		self.subject = self.msg.get('Subject', 'No Subject')
+	if current_sender.lower() == sender_mailbox.lower():
+		return mime_message
 
-		# Extract base body
-		self.base_body = self._extract_body()
+	del message_object["From"]
+	message_object["From"] = sender_mailbox
+	return message_object.as_bytes()
 
-		# Parse sender
-		from email.utils import parseaddr
-		sender_email = getattr(queue_doc, 'sender', None) or frappe.session.user
-		if sender_email:
-			_, sender_email = parseaddr(sender_email)
 
-		# Override sender if using default account
-		if sender_email != self.account_email:
-			print(f"M365 Email: Overriding sender from {sender_email} to {self.account_email}")
-			sender_email = self.account_email
+def send_single_mime_to_all(email_queue_doc, ctx, sender_mailbox, access_token):
+	"""
+	Send one message covering every pending recipient.
 
-		self.sender_email = sender_email
+	Only for expose_recipients="header", where core puts the real To and CC lists
+	into the headers: Graph would then deliver to all of them on every pass, so
+	the loop has to become a single send.
+	"""
+	pending_recipients = [r for r in email_queue_doc.recipients if not r.is_mail_sent()]
+	if not pending_recipients:
+		return False
 
-	def _extract_body(self):
-		"""Extract HTML or text body from MIME message"""
-		body = None
-		if self.msg.is_multipart():
-			for part in self.msg.walk():
-				content_type = part.get_content_type()
-				if content_type == 'text/html':
-					body = part.get_content()
-					break
-				elif content_type == 'text/plain' and not body:
-					body = part.get_content()
+	mime_message = build_mime_for_recipient(ctx, pending_recipients[0].recipient, sender_mailbox)
+	result = send_mime_as_user(sender_mailbox, mime_message, access_token)
+	sent = bool(result.get("success"))
+
+	for recipient in pending_recipients:
+		if sent:
+			recipient.update_db(status="Sent", commit=True)
 		else:
-			body = self.msg.get_content()
+			recipient.update_db(status="Not Sent", error=result.get("message"), commit=True)
 
-		return body or "No content"
+	if sent and email_queue_doc.communication:
+		comm = frappe.get_doc("Communication", email_queue_doc.communication)
+		comm.db_set("sent_or_received", "Sent")
+		comm.db_set("delivery_status", "Sent")
 
-	def build_message_for_recipient(self, recipient_email):
-		"""
-		Build personalized message for a specific recipient
-		Replaces placeholders like <!--unsubscribe_url-->, <!--email_open_check-->, etc.
-		"""
-		import quopri
-		from frappe.utils import get_url
-		from frappe.utils.verified_command import get_signed_params
-		from frappe.email.queue import get_unsubcribed_url
-
-		message = self.base_body
-
-		# Replace unsubscribe URL placeholder
-		if self.queue_doc.add_unsubscribe_link and self.queue_doc.reference_doctype:
-			unsubscribe_url = get_unsubcribed_url(
-				reference_doctype=self.queue_doc.reference_doctype,
-				reference_name=self.queue_doc.reference_name,
-				email=recipient_email,
-				unsubscribe_method=self.queue_doc.get("unsubscribe_method"),
-				unsubscribe_params=self.queue_doc.get("unsubscribe_param"),
-			)
-			unsubscribe_str = quopri.encodestring(unsubscribe_url.encode()).decode()
-			message = message.replace("<!--unsubscribe_url-->", unsubscribe_str)
-		else:
-			# Remove placeholder if no unsubscribe link
-			message = message.replace("<!--unsubscribe_url-->", "")
-
-		# Replace email tracking pixel placeholder
-		tracker_url = ""
-		if self.queue_doc.communication:
-			# Use communication-based email tracking
-			tracker_url = f"{get_url()}/api/method/frappe.core.doctype.communication.email.mark_email_as_seen?name={self.queue_doc.communication}"
-
-		if tracker_url:
-			tracker_html = f'<img src="{tracker_url}"/>'
-			tracker_str = quopri.encodestring(tracker_html.encode()).decode()
-			message = message.replace("<!--email_open_check-->", tracker_str)
-		else:
-			message = message.replace("<!--email_open_check-->", "")
-
-		# Replace CC message placeholder
-		cc_message = ""
-		if self.queue_doc.get("expose_recipients") == "footer":
-			# Get TO recipients from recipients child table
-			to_list = [r.recipient for r in self.queue_doc.recipients if r.recipient]
-			to_str = ", ".join(to_list) if to_list else ""
-
-			# Get CC from show_as_cc field
-			cc_str = self.queue_doc.get("show_as_cc") or ""
-
-			if to_str:
-				cc_message = f"This email was sent to {to_str}"
-				cc_message = f"{cc_message} and copied to {cc_str}" if cc_str else cc_message
-		message = message.replace("<!--cc_message-->", cc_message)
-
-		# Replace recipient placeholder
-		recipient_str = recipient_email if self.queue_doc.get("expose_recipients") != "header" else ""
-		message = message.replace("<!--recipient-->", recipient_str)
-
-		# Append signature if configured
-		footer = getattr(self.sending_account, 'signature', None)
-
-		if footer:
-			footer_html = f"""
-<div class="m365-email-footer" style="margin-top: 12px;">
-{footer}
-</div>
-"""
-			message = message + footer_html
-
-		return message
-
-	def get_attachments(self):
-		"""Get attachments from Email Queue"""
-		attachments = None
-		if hasattr(self.queue_doc, 'attachments') and self.queue_doc.attachments:
-			try:
-				import json
-				# Parse attachments JSON
-				attachments_data = self.queue_doc.attachments
-				if isinstance(attachments_data, str):
-					attachments_data = json.loads(attachments_data)
-
-				if attachments_data:
-					attachments = []
-					for attachment in attachments_data:
-						try:
-							# Handle print format attachments (Attach Document Print)
-							if attachment.get('print_format_attachment') == 1:
-								attachment_copy = attachment.copy()
-								attachment_copy.pop('print_format_attachment', None)
-
-								if 'print_letterhead' in attachment_copy:
-									print_letterhead = attachment_copy['print_letterhead']
-									if isinstance(print_letterhead, str):
-										attachment_copy['print_letterhead'] = print_letterhead == '1' or print_letterhead.lower() == 'true'
-
-								print_format_file = frappe.attach_print(**attachment_copy)
-								base64_content = base64.b64encode(print_format_file['fcontent']).decode('utf-8')
-
-								attachments.append({
-									"name": print_format_file['fname'],
-									"content": base64_content
-								})
-								continue
-
-							# Handle regular file attachments
-							file_identifier = attachment.get('file_url') or attachment.get('fid')
-							if not file_identifier:
-								continue
-
-							file_doc = None
-							try:
-								file_doc = frappe.get_doc("File", file_identifier)
-							except frappe.DoesNotExistError:
-								file_list = frappe.get_all("File", filters={"file_url": file_identifier}, limit=1)
-								if file_list:
-									file_doc = frappe.get_doc("File", file_list[0].name)
-
-							if not file_doc:
-								frappe.log_error(
-									title="M365 Email: Attachment Not Found",
-									message=f"Email: {self.queue_doc.name}\nFile identifier: {file_identifier}"
-								)
-								continue
-
-							file_content = file_doc.get_content()
-							base64_content = base64.b64encode(file_content).decode('utf-8')
-
-							attachments.append({
-								"name": attachment.get('file_name') or file_doc.file_name,
-								"content": base64_content
-							})
-						except Exception as attach_error:
-							frappe.log_error(
-								title="M365 Email: Single Attachment Failed",
-								message=f"Email: {self.queue_doc.name}\nAttachment: {attachment}\nError: {str(attach_error)}"
-							)
-							continue
-			except Exception as e:
-				frappe.log_error(
-					title="M365 Email: Attachment Processing Failed",
-					message=f"Email: {self.queue_doc.name}\nError: {str(e)}"
-				)
-				attachments = None
-
-		return attachments
-
-	def send_to_recipient(self, recipient):
-		"""
-		Send email to a single recipient
-
-		Args:
-			recipient: Email Queue Recipient object
-
-		Returns:
-			bool: True if sent successfully
-		"""
-		try:
-			# Build personalized message for this recipient
-			body = self.build_message_for_recipient(recipient.recipient)
-
-			# Get attachments (same for all recipients)
-			attachments = self.get_attachments()
-
-			# Get CC list (if any)
-			cc = None
-			show_as_cc = self.queue_doc.get('show_as_cc')
-			if show_as_cc and isinstance(show_as_cc, str):
-				cc = [r.strip() for r in show_as_cc.split(",") if r.strip()]
-
-			# Send via Graph API to this single recipient
-			result = send_email_as_user(
-				sender_email=self.sender_email,
-				recipients=[recipient.recipient],  # Single recipient
-				subject=self.subject,
-				body=body,
-				access_token=self.access_token,
-				cc=cc,
-				bcc=None,  # BCC not stored in Email Queue
-				attachments=attachments,
-				is_html=True
-			)
-
-			return result.get("success", False)
-
-		except Exception as e:
-			frappe.log_error(
-				title=f"M365 Email: Failed to send to {recipient.recipient}",
-				message=f"Email Queue: {self.queue_doc.name}\nError: {str(e)}"
-			)
-			return False
+	return sent
 
 
 def process_email_queue_m365():
