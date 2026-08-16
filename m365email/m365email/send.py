@@ -81,7 +81,9 @@ def auto_provision_m365_account(sender_email):
 			"m365_service_principal": sp_doc.name,
 			"enable_incoming": 0,
 			"enable_outgoing": 1,
-			"default_outgoing": 1,
+			# NOTE: default_outgoing is deliberately not set. It is a site-wide flag and
+			# Frappe permits only one holder, so setting it per user would strip it from
+			# the site's real default account on every provision.
 			"signature": signature
 		})
 
