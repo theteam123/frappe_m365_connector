@@ -196,7 +196,9 @@ def FileEmailToRecord(
 		_GuardTargetExists(target_doctype, target_name)
 		if not frappe.has_permission(target_doctype, "write", target_name):
 			frappe.throw(
-				_("You do not have permission to attach to {0} {1}").format(_(target_doctype), target_name),
+				_("You do not have permission to attach to {0} {1}").format(
+					_(target_doctype), _ResolveRecordLabel(target_doctype, target_name)
+				),
 				frappe.PermissionError,
 			)
 		if not shouldSaveEmail and not attachmentList and not commentText:
@@ -227,7 +229,7 @@ def FileEmailToRecord(
 	frappe.db.commit()
 
 	# For a task, name the assignee in the message (not the new ToDo's id).
-	summaryName = target_name if isTask else recordName
+	summaryName = target_name if isTask else _ResolveRecordLabel(recordDoctype, recordName)
 	return {
 		"success": True,
 		"communication": communicationName,
@@ -271,7 +273,20 @@ def _SearchUsers(txt: str) -> list[dict]:
 def _GuardTargetExists(doctype: str, name: str) -> None:
 	"""Reject a missing target record."""
 	if not name or not frappe.db.exists(doctype, name):
-		frappe.throw(_("{0} {1} was not found.").format(_(doctype), name or ""))
+		label = name or ""
+		frappe.throw(_("{0} {1} was not found.").format(_(doctype), label))
+
+
+
+def _ResolveRecordLabel(doctype: str, name: str) -> str:
+	"""Return the human-readable title for a filing target, never the raw id when a title exists."""
+	if not doctype or not name:
+		return name or ""
+	titleField = _GetTitleField(doctype)
+	if not titleField or titleField == "name":
+		return name
+	title = frappe.utils.cstr(frappe.get_cached_value(doctype, name, titleField)).strip()
+	return title or name
 
 
 
