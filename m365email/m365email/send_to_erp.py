@@ -273,8 +273,7 @@ def _SearchUsers(txt: str) -> list[dict]:
 def _GuardTargetExists(doctype: str, name: str) -> None:
 	"""Reject a missing target record."""
 	if not name or not frappe.db.exists(doctype, name):
-		label = name or ""
-		frappe.throw(_("{0} {1} was not found.").format(_(doctype), label))
+		frappe.throw(_("{0} was not found.").format(_(doctype)))
 
 
 
