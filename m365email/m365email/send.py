@@ -156,10 +156,15 @@ def get_sending_account_for_sender(sender_email):
 	Get the Email Account for a specific sender email.
 
 	Checks in order:
-	1. User's linked email account (via linked_user field)
-	2. Email Account with service='M365' matching sender email
+	1. Email Account with service='M365' matching the explicitly requested sender
+	2. User's linked email account (via linked_user field)
 	3. Auto-provision if eligible
 	4. Default M365 outgoing account
+
+	NOTE (2026-08-25): step 1 used to come after step 2, so a user with their own
+	linked mailbox could never send as a shared mailbox they had picked in the From
+	field; the choice was silently overridden. An explicit, enabled sender now wins;
+	everything without one behaves exactly as before.
 
 	Args:
 		sender_email: Email address of the sender
@@ -175,12 +180,7 @@ def get_sending_account_for_sender(sender_email):
 	if sender_email:
 		_, sender_email = parseaddr(sender_email)
 
-	# NOTE: First check for user's linked email account
-	userLinkedAccount = GetUserDefaultEmailAccount()
-	if userLinkedAccount and userLinkedAccount.service == "M365":
-		return userLinkedAccount, True
-
-	# Try to find an Email Account with service='M365' matching the sender
+	# Respect an explicitly requested sender that is a configured, enabled M365 mailbox
 	if sender_email and '@' in sender_email:
 		account_name = frappe.db.get_value(
 			"Email Account",
@@ -189,7 +189,13 @@ def get_sending_account_for_sender(sender_email):
 		if account_name:
 			return frappe.get_doc("Email Account", account_name), True
 
-		# Try auto-provisioning if no account found
+	# NOTE: Then the user's linked email account
+	userLinkedAccount = GetUserDefaultEmailAccount()
+	if userLinkedAccount and userLinkedAccount.service == "M365":
+		return userLinkedAccount, True
+
+	# Try auto-provisioning if no account matched the sender
+	if sender_email and '@' in sender_email:
 		auto_provisioned_account = auto_provision_m365_account(sender_email)
 		if auto_provisioned_account:
 			return auto_provisioned_account, True
