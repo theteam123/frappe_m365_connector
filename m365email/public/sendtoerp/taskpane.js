@@ -5,13 +5,21 @@
  * target ERP record, then files them through the m365email send_to_erp API.
  *
  * The panel is served same-origin with ERP, so API calls are relative. Auth is
- * isolated in the `auth` object below: it currently uses the login-session +
- * CSRF approach. If browser third-party-cookie blocking prevents the session
- * cookie from surviving inside the Outlook frame, swap `auth` for a token-based
- * implementation without touching the rest of this file.
+ * isolated in the `auth` object below and is token based (bearer header), never
+ * the ERP session cookie, which browsers block inside the Outlook frame.
+ *
+ * Staying signed in: a Microsoft identity token lasts about an hour and, in
+ * Outlook on the web, can only be renewed through a sign-in window. So after a
+ * successful Microsoft sign-in the panel asks ERP for its own remembered
+ * session token (see m365email addin_session.py), keeps it in this panel's
+ * localStorage, and reuses it on every later open. ERP expires it after a
+ * period of no use, and "Sign out" revokes it.
  */
 
 const API_BASE = "/api/method/m365email.m365email.send_to_erp.";
+const SESSION_API_BASE = "/api/method/m365email.m365email.addin_session.";
+const SESSION_STORAGE_KEY = "sendtoerp.session";   // {token, user, expires_on} in localStorage
+const AUTH_FAILURE_STATUSES = [401, 403];         // ERP rejected the bearer token
 const SEARCH_DEBOUNCE_MS = 250;
 const MIN_SEARCH_CHARS = 1;
 const TASK_TYPE = "ToDo";      // the "Task / To-Do" target searches people, not records
@@ -33,7 +41,8 @@ const ENV_LABELS = [
 ];
 
 const state = {
-	msToken: null,     // Microsoft 365 ID token (identity sent to ERP)
+	msToken: null,     // Microsoft 365 ID token (identity sent to ERP at sign-in)
+	erpSession: null,  // {token, user, expires_on} — ERP's remembered sign-in, reused between opens
 	attachments: [],   // {id, name, selected}
 	target: null,      // {doctype, value, label, create}
 	senderName: "",    // open email's sender display name (for "create new contact")
@@ -55,9 +64,11 @@ const auth = {
 		return Office.context.platform === Office.PlatformType.OfficeOnline;
 	},
 
-	// Per-request token: reuse the cached token until it nears expiry. Desktop can
-	// refresh silently; the web has no silent path, so it must sign in again.
+	// Per-request token. ERP's remembered session wins when we have one; before
+	// that, reuse the Microsoft token until it nears expiry. Desktop can refresh
+	// it silently; the web has no silent path, so it must sign in again.
 	async ensureToken() {
+		if (state.erpSession) return state.erpSession.token;
 		if (state.msToken && !isTokenExpired(state.msToken)) return state.msToken;
 		if (auth._isWeb()) throw new Error("Your sign-in has expired — please sign in again.");
 		return auth._acquireViaNaa();
@@ -152,27 +163,132 @@ function handleDialogToken(arg, dialog, resolve, reject) {
 }
 
 
+// Methods live under send_to_erp unless given as "session:<Method>".
+function apiUrl(method) {
+	const SESSION_PREFIX = "session:";
+	if (!method.startsWith(SESSION_PREFIX)) return API_BASE + method;
+	return SESSION_API_BASE + method.slice(SESSION_PREFIX.length);
+}
+
+
+// A rejected bearer while using a remembered session means ERP no longer
+// accepts it (expired, revoked, or user disabled): forget it so the next open
+// signs in with Microsoft again instead of failing forever.
+function noteAuthFailure(resp) {
+	if (!state.erpSession || !AUTH_FAILURE_STATUSES.includes(resp.status)) return;
+	clearStoredSession();
+	state.erpSession = null;
+}
+
+
 async function apiGet(method, params) {
 	const token = await auth.ensureToken();
 	const qs = params ? "?" + new URLSearchParams(params).toString() : "";
-	const resp = await fetch(`${API_BASE}${method}${qs}`, { headers: { "Authorization": `Bearer ${token}` } });
-	if (!resp.ok) throw new Error(`${method} failed (${resp.status})`);
+	const headers = { "Authorization": `Bearer ${token}` };
+	const resp = await fetch(`${apiUrl(method)}${qs}`, { headers });
+	if (!resp.ok) {
+		noteAuthFailure(resp);
+		throw new Error(`${method} failed (${resp.status})`);
+	}
 	return (await resp.json()).message;
 }
 
 
 async function apiPost(method, params) {
 	const token = await auth.ensureToken();
-	const resp = await fetch(`${API_BASE}${method}`, {
+	const resp = await fetch(apiUrl(method), {
 		method: "POST",
 		headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/x-www-form-urlencoded" },
-		body: new URLSearchParams(params),
+		body: new URLSearchParams(params || {}),
 	});
 	if (!resp.ok) {
+		noteAuthFailure(resp);
 		const text = await resp.text();
 		throw new Error(extractError(text) || `${method} failed (${resp.status})`);
 	}
 	return (await resp.json()).message;
+}
+
+
+/* ---- Remembered ERP session (survives closing and reopening the panel) ---- */
+
+function loadStoredSession() {
+	try {
+		const raw = window.localStorage.getItem(SESSION_STORAGE_KEY);
+		if (!raw) return null;
+		const stored = JSON.parse(raw);
+		if (!stored || !stored.token) return null;
+		if (stored.expires_on && new Date(stored.expires_on) <= new Date()) return null;
+		return stored;
+	} catch (e) {
+		return null;  // storage unavailable (private browsing etc.) — just sign in again
+	}
+}
+
+
+function saveStoredSession(session) {
+	try {
+		window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+	} catch (e) { /* storage unavailable — the session still works for this open */ }
+}
+
+
+function clearStoredSession() {
+	try {
+		window.localStorage.removeItem(SESSION_STORAGE_KEY);
+	} catch (e) { /* nothing to clear */ }
+}
+
+
+function describePlatform() {
+	const diagnostics = (Office.context && Office.context.diagnostics) || {};
+	return [diagnostics.host, Office.context.platform, diagnostics.version].filter(Boolean).join(" ");
+}
+
+
+// After a Microsoft sign-in, ask ERP for a remembered session so later opens
+// skip the sign-in. Failure is not fatal: the Microsoft token still works for
+// this open, it just will not be remembered.
+async function establishErpSession() {
+	try {
+		const session = await apiPost("session:CreateAddinSession", { platform: describePlatform() });
+		if (!session || !session.token) return;
+		state.erpSession = { token: session.token, user: session.user, expires_on: session.expires_on };
+		saveStoredSession(state.erpSession);
+	} catch (e) {
+		console.warn("Send to ERP: could not create a remembered session", e);
+	}
+}
+
+
+// Try the remembered session before asking anyone to sign in. Returns the ERP
+// user on success, or null (with the stale session forgotten) otherwise.
+async function resumeStoredSession() {
+	const stored = loadStoredSession();
+	if (!stored) return null;
+	state.erpSession = stored;
+	try {
+		const session = await apiGet("GetSession");
+		if (session && session.user && session.user !== "Guest") return session.user;
+	} catch (e) { /* fall through: treat as not signed in */ }
+	clearStoredSession();
+	state.erpSession = null;
+	return null;
+}
+
+
+async function signOut() {
+	try {
+		if (state.erpSession) await apiPost("session:RevokeAddinSession");
+	} catch (e) { /* revoking is best-effort; the local copy is dropped regardless */ }
+	clearStoredSession();
+	state.erpSession = null;
+	state.msToken = null;
+	hide("fileView");
+	show("loginView");
+	$("loginError").textContent = "";
+	$("loginStatus").textContent = "Signed out. Sign in to continue.";
+	show("loginBtn");
 }
 
 
@@ -457,6 +573,7 @@ async function doSignIn() {
 		if (!session || session.user === "Guest") {
 			throw new Error("Your Microsoft account isn't linked to an ERP user. Contact your administrator.");
 		}
+		await establishErpSession();
 		await enterFilingView(session.user);
 	} catch (e) {
 		$("loginStatus").textContent = "Couldn't sign in automatically.";
@@ -468,6 +585,7 @@ async function doSignIn() {
 
 function wireEvents() {
 	$("loginBtn").addEventListener("click", doSignIn);
+	$("signOutBtn").addEventListener("click", signOut);
 	$("search").addEventListener("input", onSearchInput);
 	$("doctype").addEventListener("change", updateModeForType);
 	$("createNew").addEventListener("click", chooseCreateNew);
@@ -485,6 +603,15 @@ applyEnvBadges();
 Office.onReady(async () => {
 	wireEvents();
 	show("loginView");
+
+	// A remembered ERP session skips sign-in entirely, on every platform.
+	$("loginStatus").textContent = "Checking your sign-in…";
+	const rememberedUser = await resumeStoredSession();
+	if (rememberedUser) {
+		await enterFilingView(rememberedUser);
+		return;
+	}
+
 	// The web sign-in dialog must be opened by a user gesture, so on the web we
 	// wait for the button. Desktop can start sign-in silently on load.
 	if (auth._isWeb()) {

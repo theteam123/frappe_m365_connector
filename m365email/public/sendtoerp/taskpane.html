@@ -6,7 +6,7 @@
 	<title>Send to ERP</title>
 	<script src="https://appsforoffice.microsoft.com/lib/1.1/hosted/office.js"></script>
 	<script src="msal-browser.min.js"></script>
-	<link rel="stylesheet" href="taskpane.css?v=7" />
+	<link rel="stylesheet" href="taskpane.css?v=8" />
 </head>
 <body>
 	<main id="app">
@@ -24,6 +24,7 @@
 			<header class="topbar">
 				<span id="envLabel" class="env"></span>
 				<span id="whoami" class="muted"></span>
+				<button type="button" id="signOutBtn" class="link topbar-action" title="Forget this sign-in on this device">Sign out</button>
 			</header>
 
 			<h1>Send to ERP</h1>
@@ -56,6 +57,6 @@
 		</section>
 	</main>
 
-	<script src="taskpane.js?v=7"></script>
+	<script src="taskpane.js?v=8"></script>
 </body>
 </html>

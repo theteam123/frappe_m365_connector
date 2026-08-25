@@ -188,8 +188,19 @@ def FileEmailToRecord(
 	isTask = target_doctype == TASK_TARGET
 	shouldCreateNew = bool(int(create_new or 0))
 
+	emailFields = {
+		"subject": subject,
+		"sender": sender,
+		"recipients": recipients,
+		"sent_date": sent_date,
+		"body_html": body_html,
+	}
+
+	communicationName = None
 	if isTask:
-		recordDoctype, recordName = _CreateTask(target_name, subject, commentText)
+		recordDoctype, recordName, communicationName = CreateTaskFromEmail(
+			target_name, commentText, emailFields, shouldSaveEmail,
+		)
 	elif shouldCreateNew:
 		recordDoctype, recordName = _CreateContact(target_doctype, new_name, new_email, body_html)
 	else:
@@ -211,10 +222,13 @@ def FileEmailToRecord(
 
 	# Build the email body: on a record, a filing note rides at the top so the
 	# comment shares the email's timeline entry; then the attachment links.
-	communicationName = None
-	if shouldSaveEmail:
+	# (A task's email already exists — it was filed before the task so the task
+	# could reference it — so only the attachment links are added to it here.)
+	if isTask:
+		AppendAttachmentLinksToCommunication(communicationName, createdFiles)
+	elif shouldSaveEmail:
 		emailBody = body_html
-		if commentText and not isTask:
+		if commentText:
 			emailBody = _PrependNote(emailBody, commentText)
 		communicationName = _CreateCommunication(
 			recordDoctype, recordName, subject, sender, recipients, sent_date,
@@ -498,21 +512,84 @@ def _BuildSummary(isTask: bool, savedEmail: bool, createdFiles: list[dict], targ
 	return _("Filed {0} to {1} {2}.").format(what, _(targetDoctype), targetName)
 
 
-def _CreateTask(assignee: str, subject: str, comment: str) -> tuple[str, str]:
-	"""Create a ToDo (task) assigned to the given user.
+def CreateTaskFromEmail(
+	assignee: str,
+	comment: str,
+	email: dict,
+	shouldSaveEmail: bool,
+) -> tuple[str, str, Optional[str]]:
+	"""Create a ToDo for the assignee, filed from the open email.
+
+	The email is saved FIRST so the task can carry it as its reference: the
+	"ToDo Assigned" notification renders when the task is inserted and reads the
+	source email (subject, sender, body) through ``reference_type`` /
+	``reference_name``. The email is then pointed back at the task so it shows
+	on the task's own timeline — the same two-way link Frappe's inbox uses when
+	an email is assigned to someone.
 
 	Args:
 		assignee: User id (email) to assign the task to.
-		subject: Email subject, used as a fallback task description.
 		comment: The user's note, used as the task description when provided.
+		email: {subject, sender, recipients, sent_date, body_html} of the email.
+		shouldSaveEmail: Whether the user chose to file the email itself.
 
 	Returns:
-		(doctype, name) of the new ToDo, so the email and attachments can be
-		filed against it like any other record.
+		("ToDo", task name, communication name or None).
 	"""
 	if not assignee or not frappe.db.exists("User", assignee):
 		frappe.throw(_("Select a person to assign the task to."))
 
+	sourceCommunication = None
+	if shouldSaveEmail:
+		sourceCommunication = _CreateCommunication(
+			"", "", email["subject"], email["sender"], email["recipients"],
+			email["sent_date"], email["body_html"],
+		)
+
+	taskName = _CreateTask(assignee, email["subject"], comment, sourceCommunication)
+
+	if sourceCommunication:
+		communication = frappe.get_doc("Communication", sourceCommunication)
+		communication.reference_doctype = "ToDo"
+		communication.reference_name = taskName
+		communication.save(ignore_permissions=True)
+
+	return ("ToDo", taskName, sourceCommunication)
+
+
+
+def AppendAttachmentLinksToCommunication(communicationName: Optional[str], files: list) -> None:
+	"""Add the filed-attachment links to an already-saved email's body."""
+	if not communicationName or not files:
+		return
+
+	content = frappe.db.get_value("Communication", communicationName, "content") or ""
+	newContent = _AppendAttachmentLinks(content, files)
+	frappe.db.set_value(
+		"Communication", communicationName, "content", newContent, update_modified=False,
+	)
+
+
+
+def _CreateTask(
+	assignee: str,
+	subject: str,
+	comment: str,
+	sourceCommunication: Optional[str] = None,
+) -> str:
+	"""Create a ToDo (task) assigned to the given user.
+
+	Args:
+		assignee: User id (email) to assign the task to — already validated.
+		subject: Email subject, used as a fallback task description.
+		comment: The user's note, used as the task description when provided.
+		sourceCommunication: The filed email's Communication name, stored as the
+			task's reference so notifications and the task board can show it.
+
+	Returns:
+		The new ToDo's name, so the attachments can be filed against it like
+		any other record.
+	"""
 	# Store the description as plain text: the ToDo description shows in plain
 	# fields (task title / edit box), so HTML-escaping it would surface literal
 	# entities like &apos;. Frappe sanitises this field when rendered as HTML.
@@ -524,11 +601,13 @@ def _CreateTask(assignee: str, subject: str, comment: str) -> tuple[str, str]:
 		"description": description,
 		"priority": "Medium",
 		"status": "Open",
+		"reference_type": "Communication" if sourceCommunication else None,
+		"reference_name": sourceCommunication,
 	})
 	# Authorization is enforced upstream: the Task/To-Do option is only offered
 	# when the user has create permission on ToDo (see GetPickableDoctypes).
 	task.insert(ignore_permissions=True)
-	return ("ToDo", task.name)
+	return task.name
 
 
 def _CreateContact(target_doctype: str, name: str, email: str, body_html: str = "") -> tuple[str, str]:

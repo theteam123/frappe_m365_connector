@@ -6,14 +6,26 @@ against the issuing tenant's public signing keys and authenticates the request
 as the matching Frappe user. Identity comes from the user's existing Microsoft
 365 sign-in — no ERP passwords are involved.
 
-Only Microsoft-issued JWTs whose audience matches a configured M365 app are
-handled; anything else is ignored so normal Frappe auth still applies.
+Two bearer forms are handled; anything else is ignored so normal Frappe auth
+still applies:
+
+- A Microsoft-issued JWT whose audience matches a configured M365 app — the
+  fresh sign-in.
+- An ERP-issued add-in session token (``sterp_...``) minted after such a sign-in
+  so the add-in stays signed in between panel opens — see ``addin_session``.
 """
 import frappe
 from typing import Optional
 
 import jwt
 from jwt import PyJWKClient
+
+from m365email.m365email.addin_session import (
+	AUTH_METHOD_M365,
+	AUTH_METHOD_SESSION,
+	SESSION_TOKEN_PREFIX,
+	ValidateSessionToken,
+)
 
 
 BEARER_PREFIX = "Bearer "
@@ -26,7 +38,13 @@ USER_EMAIL_CLAIMS = ("preferred_username", "upn", "email", "unique_name")
 
 
 def ValidateAddinToken() -> None:
-	"""Auth hook: authenticate a request bearing an Azure AD add-in token."""
+	"""Auth hook: authenticate a request bearing an add-in token.
+
+	Either an ERP-issued session token (remembered sign-in) or a Microsoft 365
+	identity token (fresh sign-in). Which one was used is recorded on
+	``frappe.local.addin_auth_method`` so ``addin_session.CreateAddinSession``
+	can insist on a fresh Microsoft sign-in.
+	"""
 	if frappe.local.login_manager.user not in ("", "Guest", None):
 		return
 
@@ -34,15 +52,34 @@ def ValidateAddinToken() -> None:
 	if not token:
 		return
 
+	if token.startswith(SESSION_TOKEN_PREFIX):
+		SignInAs(ValidateSessionToken(token), AUTH_METHOD_SESSION)
+		return
+
+	SignInAs(ResolveMicrosoftUser(token), AUTH_METHOD_M365)
+
+
+
+def ResolveMicrosoftUser(token: str) -> Optional[str]:
+	"""Validate a Microsoft JWT and map it to an enabled Frappe user, else None."""
+	# A JWT has three dot-separated segments; ignore anything else (e.g. opaque tokens).
+	if token.count(".") != 2:
+		return None
+
 	apps = _GetConfiguredApps()
 	if not apps:
-		return
+		return None
 
 	claims = _ValidateToken(token, apps)
 	if not claims:
-		return
+		return None
 
-	user = _ResolveUser(claims)
+	return _ResolveUser(claims)
+
+
+
+def SignInAs(user: Optional[str], authMethod: str) -> None:
+	"""Authenticate the request as ``user`` (no-op when no user resolved)."""
 	if not user:
 		return
 
@@ -52,21 +89,17 @@ def ValidateAddinToken() -> None:
 	frappe.set_user(user)
 	frappe.local.login_manager.user = user
 	frappe.local.form_dict = formDict
+	frappe.local.addin_auth_method = authMethod
 
 
 
 def _ExtractBearerToken() -> Optional[str]:
-	"""Return the bearer token from the Authorization header, if JWT-shaped."""
+	"""Return the bearer token from the Authorization header, if any."""
 	header = frappe.get_request_header("Authorization") or ""
 	if not header.startswith(BEARER_PREFIX):
 		return None
 
-	token = header[len(BEARER_PREFIX):].strip()
-	# A JWT has three dot-separated segments; ignore anything else (e.g. opaque tokens).
-	if token.count(".") != 2:
-		return None
-
-	return token
+	return header[len(BEARER_PREFIX):].strip() or None
 
 
 

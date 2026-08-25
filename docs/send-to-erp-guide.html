@@ -212,6 +212,10 @@
         use the other <strong>Send to ERP</strong> button.</p>
         <p>Sign in with <strong>Microsoft 365</strong>, automatic on desktop; on the web a small
         sign-in window pops up. No ERP password is needed.</p>
+        <p>You only do this once per device: ERP remembers the sign-in, so the panel opens
+        straight to the filing view next time. It stays remembered for 30 days after you last
+        used it (and at most 90 days in total), and <strong>Sign out</strong> at the top of the
+        panel forgets it immediately.</p>
         <figure>
           <img src="send-to-erp-guide-assets/01-signin.png" alt="Sign-in screen with Production badge" />
           <figcaption>The sign-in screen, note the green <strong>PRODUCTION</strong> badge.</figcaption>
@@ -269,7 +273,9 @@
       <div class="card">
         <h4>Sign-in</h4>
         <p>Uses your Microsoft 365 identity. Desktop gets a token silently; the web opens a separate
-        sign-in window. ERP verifies the token and maps it to your user.</p>
+        sign-in window. ERP verifies the token and maps it to your user, then issues its own
+        remembered session (an <em>M365 Addin Session</em> record, hash only) so later opens skip
+        the sign-in. Admins can revoke one from that list.</p>
       </div>
       <div class="card">
         <h4>Permissions</h4>
@@ -292,6 +298,7 @@
       <tr><td>“Elevated permission is required… body.getAsync”</td><td>Old add-in version</td><td>Admin: update to package <strong>v1.0.4</strong> or later.</td></tr>
       <tr><td>Admin “upload failed / check the manifest”</td><td>A stale cached <code>.zip</code> was uploaded</td><td>Re-download with a <code>?v=</code> cache-buster and upload the fresh file.</td></tr>
       <tr><td>“Your Microsoft account isn't linked to an ERP user”</td><td>Your Microsoft email doesn't match an enabled ERP user</td><td>Admin: ensure the user exists and is enabled in ERP with the same email.</td></tr>
+      <tr><td>Asked to sign in again every time the panel opens</td><td>The remembered session expired, was revoked, or the browser discards the panel's storage (Safari private windows do this)</td><td>Sign in once more. If it keeps happening on Safari, use the Outlook desktop app or another browser. Admin: check the user's <em>M365 Addin Session</em> records are not revoked.</td></tr>
     </table>
 
     <!-- 6 -->

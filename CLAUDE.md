@@ -44,7 +44,7 @@ pipeline for both incoming sync and outgoing send.
 
 ---
 
-## DocTypes (4)
+## DocTypes (5)
 
 | DocType | Purpose |
 |---------|---------|
@@ -52,6 +52,18 @@ pipeline for both incoming sync and outgoing send.
 | **M365 Email Account** | Per-mailbox config (user or shared), folder filters, sync state |
 | **M365 Email Folder Filter** | Child table — per-folder sync enable/disable and delta tokens |
 | **M365 Email Sync Log** | Audit trail for all sync operations (naming: `SYNC-LOG-{#####}`) |
+| **M365 Addin Session** | Remembered sign-in for the Send-to-ERP Outlook add-in (token hash only; sliding 30-day expiry, revocable) |
+
+---
+
+## Send to ERP (Outlook add-in)
+
+| Piece | Where |
+|-------|-------|
+| Panel (HTML/JS/CSS, manifests) | `public/sendtoerp/` — bump `?v=N` on `taskpane.html` when the JS/CSS changes |
+| Filing API | `send_to_erp.py` — a Task/To-Do target files the email FIRST, then creates the ToDo with `reference_type = Communication` so the "ToDo Assigned" Notification (tg_custom fixture) can quote the source email |
+| Sign-in | `addin_sso.py` (auth hook: Microsoft JWT or `sterp_` session token) + `addin_session.py` (mint / validate / revoke remembered sessions) |
+| User guide | `docs/send-to-erp-guide.html` |
 
 ---
 
