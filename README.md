@@ -157,6 +157,18 @@ Tracks sync operations and errors.
 
 Naming: `SYNC-LOG-{#####}`
 
+#### M365 Addin Session
+
+A remembered sign-in for the **Send to ERP** Outlook add-in. Created when a user signs
+in with Microsoft 365 from the add-in; lets later panel opens skip the sign-in.
+
+**Fields:** `user`, `platform`, `expires_on` (30-day sliding, 90-day absolute cap),
+`last_used_on`, `revoked`, `token_hash` (SHA-256 only — the token itself is never stored).
+
+**Permissions:** System Manager (list, revoke, delete). Records are only created by the
+add-in (`addin_session.CreateAddinSession`), which requires a request authenticated
+with a validated Microsoft token.
+
 ### Core Modules
 
 #### `auth.py` - Authentication

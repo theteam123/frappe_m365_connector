@@ -1,0 +1,99 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-08-25 12:00:00.000000",
+ "description": "A remembered sign-in for the Send-to-ERP Outlook add-in. Created when a user signs in with Microsoft 365; lets the add-in open without asking again until it expires or is revoked. Only a hash of the token is stored.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "user",
+  "platform",
+  "column_break_1",
+  "expires_on",
+  "last_used_on",
+  "revoked",
+  "section_break_2",
+  "token_hash"
+ ],
+ "fields": [
+  {
+   "fieldname": "user",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "User",
+   "options": "User",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "platform",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Platform",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "expires_on",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Expires On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_used_on",
+   "fieldtype": "Datetime",
+   "label": "Last Used On",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "Tick to sign this add-in session out. The user will be asked to sign in with Microsoft 365 again next time they open the add-in.",
+   "fieldname": "revoked",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Revoked"
+  },
+  {
+   "fieldname": "section_break_2",
+   "fieldtype": "Section Break"
+  },
+  {
+   "description": "SHA-256 of the session token. The token itself is never stored.",
+   "fieldname": "token_hash",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Token Hash",
+   "read_only": 1,
+   "unique": 1
+  }
+ ],
+ "in_create": 1,
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-25 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "M365Email",
+ "name": "M365 Addin Session",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "delete": 1,
+   "export": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}
