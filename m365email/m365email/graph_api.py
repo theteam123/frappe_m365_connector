@@ -621,3 +621,60 @@ def send_email_as_user(sender_email, recipients, subject, body, access_token, cc
 			"success": False,
 			"message": str(e)
 		}
+
+
+
+# NOTE: A mailbox is probed through mailFolders, not /users/{id}. The mail-only
+# application permissions this app holds cannot read directory objects, but they can
+# open any mailbox that exists, and Graph answers 404 ErrorInvalidUser when there is
+# no mailbox at that address.
+MAILBOX_PROBE_ENDPOINT = "https://graph.microsoft.com/v1.0/users/{email}/mailFolders"
+PROBE_PARAMS = {"$top": 1, "$select": "id"}
+PROBE_TIMEOUT = 30
+MAX_PROBE_ATTEMPTS = 3
+DEFAULT_RETRY_AFTER_SECONDS = 10
+MAILBOX_MISSING_ERROR_CODES = (
+	"ErrorInvalidUser",
+	"ResourceNotFound",
+	"MailboxNotEnabledForRESTAPI",
+)
+HTTP_STATUS_OK = 200
+HTTP_STATUS_NOT_FOUND = 404
+HTTP_STATUS_TOO_MANY_REQUESTS = 429
+
+
+
+def ExtractGraphErrorCode(response: requests.Response) -> str:
+	"""The Graph error code in a failed response, or "" when the body is not Graph JSON."""
+	try:
+		errorBody = response.json().get("error") or {}
+	except ValueError:
+		return ""
+	return errorBody.get("code") or ""
+
+
+
+def MailboxExists(userEmail: str, accessToken: str) -> bool:
+	"""True when Microsoft 365 has a mailbox at this address, False when it says there is none.
+
+	Anything other than a clear yes or a clear no is raised, so an expired token or a
+	throttled request can never read as "no mailbox" and get somebody's work email cleared.
+	"""
+	url = MAILBOX_PROBE_ENDPOINT.format(email=userEmail)
+	headers = {"Authorization": f"Bearer {accessToken}"}
+
+	for attempt in range(MAX_PROBE_ATTEMPTS):
+		response = requests.get(url, headers=headers, params=PROBE_PARAMS, timeout=PROBE_TIMEOUT)
+		if response.status_code != HTTP_STATUS_TOO_MANY_REQUESTS:
+			break
+		time.sleep(int(response.headers.get("Retry-After", DEFAULT_RETRY_AFTER_SECONDS)))
+
+	if response.status_code == HTTP_STATUS_OK:
+		return True
+
+	errorCode = ExtractGraphErrorCode(response)
+	if response.status_code == HTTP_STATUS_NOT_FOUND and errorCode in MAILBOX_MISSING_ERROR_CODES:
+		return False
+
+	failure = _("Mailbox check failed for {0}: HTTP {1} {2}")
+	frappe.throw(failure.format(userEmail, response.status_code, errorCode))

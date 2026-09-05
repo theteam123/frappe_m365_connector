@@ -13,6 +13,11 @@ from email.utils import parseaddr
 from frappe.email.doctype.email_queue.email_queue import SendMailContext
 from m365email.m365email.auth import get_access_token
 from m365email.m365email.graph_api import send_mime_as_user
+from m365email.m365email.provisioning import (
+	CreateM365Account,
+	ExtractDomain,
+	FindProvisioningServicePrincipal,
+)
 
 
 def auto_provision_m365_account(sender_email):
@@ -24,6 +29,9 @@ def auto_provision_m365_account(sender_email):
 	- User's email domain matches a Service Principal's domain
 	- Service Principal has auto-provisioning enabled
 
+	NOTE: The account itself is built by provisioning.CreateM365Account, shared with the
+	proactive path other apps call once they know a mailbox is live.
+
 	Args:
 		sender_email: Email address of the sender
 
@@ -31,67 +39,22 @@ def auto_provision_m365_account(sender_email):
 		Email Account doc if auto-provisioned, None otherwise
 	"""
 	try:
-		# Get the user from email
 		user = frappe.db.get_value("User", {"email": sender_email}, "name")
 		if not user:
 			return None
 
-		# Check if user has M365 User role
 		if not frappe.db.exists("Has Role", {"parent": user, "role": "M365 User"}):
 			return None
 
-		# Extract domain from email
-		if '@' not in sender_email:
-			return None
-		domain = sender_email.split('@')[1].lower()
-
-		# Find a Service Principal with matching domain and auto-provisioning enabled
-		service_principals = frappe.get_all(
-			"M365 Email Service Principal Settings",
-			filters={
-				"enabled": 1,
-				"enable_auto_provision": 1,
-				"domain": domain
-			},
-			limit=1
-		)
-
-		if not service_principals:
+		servicePrincipal = FindProvisioningServicePrincipal(ExtractDomain(sender_email))
+		if servicePrincipal is None:
 			return None
 
-		sp_doc = frappe.get_doc("M365 Email Service Principal Settings", service_principals[0].name)
-
-		# Get user's full name
-		user_doc = frappe.get_doc("User", user)
-		user_full_name = user_doc.full_name or user_doc.first_name or user
-
-		# Prepare signature with replaced placeholder
-		signature = ""
-		if sp_doc.default_footer:
-			signature = sp_doc.default_footer.replace("<!--Sender-->", user_full_name)
-
-		# Create Email Account with service='M365'
-		account = frappe.get_doc({
-			"doctype": "Email Account",
-			"email_account_name": f"{user_full_name} ({sender_email})",
-			"service": "M365",
-			"email_id": sender_email,
-			"linked_user": user,
-			"m365_account_type": "User Mailbox",
-			"m365_service_principal": sp_doc.name,
-			"enable_incoming": 0,
-			"enable_outgoing": 1,
-			# NOTE: default_outgoing is deliberately not set. It is a site-wide flag and
-			# Frappe permits only one holder, so setting it per user would strip it from
-			# the site's real default account on every provision.
-			"signature": signature
-		})
-
-		account.insert(ignore_permissions=True)
+		account = CreateM365Account(servicePrincipal, user, sender_email)
 		frappe.db.commit()
 
-		print(f"M365 Email: Auto-provisioned account for {sender_email} using Service Principal {sp_doc.name}")
-
+		provisionedMessage = f"M365 Email: Auto-provisioned account for {sender_email}"
+		print(f"{provisionedMessage} using Service Principal {servicePrincipal.name}")
 		return account
 
 	except Exception as e:
@@ -100,6 +63,7 @@ def auto_provision_m365_account(sender_email):
 			message=f"Error: {str(e)}\n\nTraceback: {frappe.get_traceback()}"
 		)
 		return None
+
 
 
 def GetUserDefaultEmailAccount(user: str = None):

@@ -184,6 +184,17 @@ with a validated Microsoft token.
 - `create_communication_from_message_for_email_account()` - Process emails
 - Delta token management for incremental sync (stores the full `@odata.deltaLink` URL per folder)
 
+#### `provisioning.py` - Account Provisioning
+- `FindProvisioningServicePrincipal(domain)` - The enabled Service Principal with auto-provisioning on for a domain
+- `ProbeMailbox(email, service_principal)` - Ask Microsoft 365 whether a mailbox exists (see `graph_api.MailboxExists`)
+- `CreateM365Account(sp, user, email)` - Insert an outgoing-only M365 Email Account owned by a user
+- `EnsureM365AccountForUser(user, email="", isMailboxLive=None)` - Idempotent: create the account if the mailbox exists
+
+Auto-provisioning is switched on per Service Principal (**Enable Auto-Provisioning** + **Domain**). Two paths use it:
+the lazy one in `send.py` (a user with the `M365 User` role sends for the first time) and any app that walks its own
+people list and calls `EnsureM365AccountForUser` once it knows the mailbox is live. On the SGC benches the `hr` app's
+daily `SyncEmployeeMailboxes` task does exactly that, and the `tg_custom` signature hook fills in the signature on insert.
+
 #### `send.py` - Email Sending
 - `get_sending_account_for_sender(sender_email)` - Find M365 account for a sender
 - `GetUserDefaultEmailAccount(user)` - Find a user's default outgoing account (via `linked_user`)

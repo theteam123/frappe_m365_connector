@@ -75,6 +75,7 @@ pipeline for both incoming sync and outgoing send.
 | `graph_api.py` | ~379 | Microsoft Graph API wrapper (messages, attachments, folders, events, send) |
 | `sync.py` | ~406 | Incoming email sync engine — delta tokens, deduplication, Communication creation |
 | `send.py` | ~561 | Outgoing email — intercepts Email Queue, auto-provisioning, MIME building |
+| `provisioning.py` | ~140 | Creates outgoing M365 Email Accounts once a mailbox is known to exist; shared by the lazy first-send path in `send.py` and by other apps (the hr app's daily mailbox sync) |
 | `event_sync.py` | ~344 | Calendar event sync with timezone handling |
 | `tasks.py` | ~271 | Scheduled task orchestration |
 | `custom_fields.py` | ~398 | Adds M365 fields to Email Account and Email Queue doctypes |
@@ -122,6 +123,12 @@ after_migrate = "m365email.m365email.custom_fields.create_m365_custom_fields"
 | Hourly | `tasks.refresh_all_tokens` | Refresh OAuth tokens before expiration |
 | Daily | `tasks.cleanup_old_logs` | Delete sync logs older than 30 days |
 | Daily | `tasks.validate_service_principals` | Test all SP connections |
+
+> **Mailbox probe.** `graph_api.MailboxExists` asks `/users/{email}/mailFolders`, not `/users/{id}`:
+> the app's mail-only application permissions cannot read directory objects, so it can neither list
+> users nor read `accountEnabled`. A 200 means the mailbox exists; a 404 `ErrorInvalidUser` means it
+> does not. Anything else raises, so a dead token never reads as "no mailbox". Until `User.Read.All`
+> is granted in Azure, "active mailbox" means "mailbox exists" (a blocked sign-in still has one).
 
 ---
 
