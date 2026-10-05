@@ -13,6 +13,7 @@ from datetime import datetime
 from email.utils import parseaddr
 from dateutil import parser as dateutil_parser
 import pytz
+from m365email.login_identity import SameLogin
 
 
 # NOTE: Inbound emails forwarded to a tagged address like "project+3074@domain"
@@ -206,7 +207,7 @@ def user_can_configure_account(user, email_account):
 
 	# For User Mailbox: user can configure their own
 	account_type = getattr(email_account, 'm365_account_type', 'User Mailbox')
-	if account_type == "User Mailbox" and email_account.owner == user:
+	if account_type == "User Mailbox" and SameLogin(email_account.owner, user):
 		return True
 
 	# For Shared Mailbox: only System Manager
