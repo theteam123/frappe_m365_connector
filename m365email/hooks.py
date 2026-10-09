@@ -141,6 +141,21 @@ has_permission = {
 	"Communication": "m365email.m365email.permissions.has_communication_permission",
 }
 
+# NOTE: Plain-English sentences for the permission explainer, one per rule registered under
+# has_permission above (these rules can only refuse access). Each key must match a
+# has_permission value exactly; without an entry the explainer shows a generic line.
+permission_rule_descriptions = {
+	"m365email.m365email.permissions.has_communication_permission": (
+		"Where the email privacy filter is switched on, an email tied to a mailbox owner is "
+		"open only to that person, System Managers included; other communications and "
+		"emails with no owner are not held back."
+	),
+	"m365email.m365email.doctype.m365_email_account.m365_email_account.has_permission": (
+		"A mailbox account is open to System Managers, to the person a personal mailbox belongs to, "
+		"and to people holding the role named on the account; everyone else is refused."
+	),
+}
+
 # DocType Class
 # ---------------
 # Override standard doctype classes
