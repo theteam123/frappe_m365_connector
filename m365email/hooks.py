@@ -156,6 +156,16 @@ permission_rule_descriptions = {
 	),
 }
 
+# NOTE: Plain-English sentence per permission_query_conditions rule, shown on a list view by the
+# permission explainer. Each key must match a permission_query_conditions value exactly.
+permission_query_rule_descriptions = {
+	"m365email.m365email.permissions.get_communication_permission_query_conditions": (
+		"Where the email privacy filter is switched on, emails are listed only when they "
+		"belong to you or to no mailbox owner; other kinds of communication are not "
+		"affected by this rule."
+	),
+}
+
 # DocType Class
 # ---------------
 # Override standard doctype classes
