@@ -4,6 +4,7 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
+from m365email.login_identity import SameLogin
 
 
 class M365EmailAccount(Document):
@@ -78,7 +79,7 @@ def has_permission(doc, ptype, user):
 		return True
 
 	# For User Mailbox: user can only access their own
-	if doc.account_type == "User Mailbox" and doc.user == user:
+	if doc.account_type == "User Mailbox" and SameLogin(doc.user, user):
 		return True
 
 	# Check if user has the role assigned to this account
