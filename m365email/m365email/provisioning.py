@@ -65,6 +65,22 @@ def FindProvisioningServicePrincipal(domain: str) -> Document | None:
 
 
 
+def FindEnabledServicePrincipal(domain: str) -> str | None:
+	"""Name of an enabled Service Principal for this domain, auto-provisioning or not."""
+	wantedDomain = NormalizeDomain(domain)
+	if not wantedDomain:
+		return None
+
+	fields = ["name", "domain"]
+	candidates = frappe.get_all(SERVICE_PRINCIPAL_DOCTYPE, filters={"enabled": 1}, fields=fields)
+	for candidate in candidates:
+		if NormalizeDomain(candidate.domain) == wantedDomain:
+			return candidate.name
+
+	return None
+
+
+
 def ProbeMailbox(emailAddress: str, servicePrincipalName: str) -> bool:
 	"""Ask Microsoft 365 whether a mailbox exists at this address.
 
@@ -152,3 +168,36 @@ def EnsureM365AccountForUser(
 
 	CreateM365Account(servicePrincipal, user, address)
 	return PROVISION_CREATED
+
+
+
+@frappe.whitelist()
+def GetUserEmailAccountDefaults(user: str) -> dict:
+	"""Prefill for the User form's "Create User Email" button, matching an auto-provisioned
+	account. Empty when no M365 Service Principal covers the user's domain."""
+	if not frappe.has_permission(EMAIL_ACCOUNT_DOCTYPE, "create"):
+		frappe.throw(_("Not permitted to create an Email Account"), frappe.PermissionError)
+	if not frappe.has_permission(USER_DOCTYPE, "read", user):
+		frappe.throw(_("Not permitted to read this User"), frappe.PermissionError)
+
+	userFields = ["name", "email", "full_name", "first_name"]
+	userRow = frappe.db.get_value(USER_DOCTYPE, user, userFields, as_dict=True)
+	if not userRow:
+		return {}
+
+	address = (userRow.email or userRow.name).strip().lower()
+	servicePrincipalName = FindEnabledServicePrincipal(ExtractDomain(address))
+	if not servicePrincipalName:
+		return {}
+
+	userFullName = userRow.full_name or userRow.first_name or userRow.name
+	return {
+		"email_account_name": ResolveAccountName(userFullName, address),
+		"email_id": address,
+		"service": M365_SERVICE,
+		"linked_user": userRow.name,
+		"enable_incoming": 0,
+		"enable_outgoing": 1,
+		"m365_service_principal": servicePrincipalName,
+		"m365_account_type": USER_MAILBOX_TYPE,
+	}
