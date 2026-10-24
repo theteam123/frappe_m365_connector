@@ -18,8 +18,12 @@ from frappe import _
 
 # Doctypes a user may file an email against, in picker order. Each user only
 # sees the subset they have read access to (see GetPickableDoctypes).
+# NOTE: Candidate and Employee added for recruitment (Paul, 2026-10-23); sites without hr skip
+# them, because GetPickableDoctypes drops doctypes that do not exist.
 DEFAULT_PICKABLE_DOCTYPES = [
 	"Contact",
+	"Candidate",
+	"Employee",
 	"Project",
 	"Purchase Order",
 	"Supplier",
@@ -36,6 +40,8 @@ CONTACT_EXTRACTION_MAX_TOKENS = 400  # AI response cap for contact-field extract
 # that share a title (e.g. two contacts both named "Paul Johnson").
 SECONDARY_FIELDS = {
 	"Contact": "email_id",
+	"Candidate": "email_address",
+	"Employee": "work_email_address",
 }
 
 # Special pseudo-target: rather than an existing record, the user picks a person
