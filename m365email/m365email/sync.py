@@ -397,6 +397,8 @@ def sync_attachments_for_communication(comm_name, email_account, message_id, acc
 						"file_name": attachment.get("name"),
 						"attached_to_doctype": "Communication",
 						"attached_to_name": comm_name,
+						# Inbound mail carries resumes, IDs and licences: never a public /files URL.
+						"is_private": 1,
 						"content": base64.b64decode(content_bytes)
 					})
 					file_doc.insert(ignore_permissions=True)
