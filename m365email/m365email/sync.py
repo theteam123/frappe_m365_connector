@@ -12,6 +12,7 @@ import frappe
 from frappe import _
 from datetime import datetime
 from m365email.m365email.auth import get_access_token
+from m365email.m365email.reply_matching import GetReplyReference
 from m365email.m365email.graph_api import (
 	get_messages_delta,
 	get_message_details,
@@ -299,6 +300,10 @@ def create_communication_from_message_for_email_account(message, email_account, 
 		reference_doctype, reference_name = get_communication_reference(
 			subject, sender_email, recipients, cc
 		)
+		if is_incoming and not reference_name:
+			reference_doctype, reference_name = GetReplyReference(
+				email_account.email_id, message_id, access_token
+			)
 
 		# Create Contact if enabled
 		if email_account.m365_auto_create_contact and is_incoming:
