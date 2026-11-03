@@ -7,7 +7,7 @@ Scheduled tasks for M365 Email Integration
 
 import frappe
 from frappe import _
-from frappe.utils import now_datetime, time_diff_in_seconds
+from frappe.utils import add_days, now_datetime, time_diff_in_seconds
 from m365email.m365email.sync import sync_email_account
 from m365email.m365email.event_sync import sync_calendar_events
 from m365email.m365email.auth import refresh_token, test_connection
@@ -16,6 +16,8 @@ from m365email.m365email.auth import refresh_token, test_connection
 # NOTE: Default intervals used when Service Principal settings are not configured
 DEFAULT_EMAIL_SYNC_INTERVAL_MINUTES = 5
 DEFAULT_CALENDAR_SYNC_INTERVAL_MINUTES = 5
+SYNC_LOG_DOCTYPE = "M365 Email Sync Log"
+SYNC_LOG_RETENTION_DAYS = 30
 
 
 def ShouldSyncServicePrincipal(servicePrincipalName: str, syncType: str) -> bool:
@@ -282,38 +284,30 @@ def refresh_all_tokens():
 	)
 
 
-def cleanup_old_logs():
+def cleanup_old_logs() -> None:
 	"""
-	Cleanup old sync logs (older than 30 days)
-	Scheduled to run daily
+	Remove sync logs older than SYNC_LOG_RETENTION_DAYS. Scheduled to run daily.
+
+	NOTE: The name is the scheduler_events entry in hooks.py, so it keeps its snake_case form.
+
+	NOTE: One bulk delete, not frappe.delete_doc per row. delete_doc keeps a Deleted Document
+	copy and a "Deleted" comment for every row, and queues a delete_dynamic_links job for each.
+	About 1,900 rows a night became about 1,900 queued jobs at once, which pushed the default
+	queue past Frappe's limit, where every frappe.enqueue raises QueueOverloaded (production,
+	2026-11-04). A sync log has no controller hooks, child tables or attachments and no field
+	links to one, so nothing else has to be removed with it.
 	"""
 	print("M365 Email: Starting cleanup of old sync logs")
 
-	from frappe.utils import add_days, now_datetime
-
-	# Delete logs older than 30 days
-	cutoff_date = add_days(now_datetime(), -30)
-
-	old_logs = frappe.get_all(
-		"M365 Email Sync Log",
-		filters={
-			"creation": ["<", cutoff_date]
-		},
-		pluck="name"
-	)
-
-	if not old_logs:
+	cutoffDate = add_days(now_datetime(), -SYNC_LOG_RETENTION_DAYS)
+	oldLogFilter = {"creation": ["<", cutoffDate]}
+	oldLogCount = frappe.db.count(SYNC_LOG_DOCTYPE, oldLogFilter)
+	if not oldLogCount:
 		print("M365 Email: No old logs to cleanup")
 		return
 
-	print(f"M365 Email: Deleting {len(old_logs)} old log(s)")
-
-	for log_name in old_logs:
-		try:
-			frappe.delete_doc("M365 Email Sync Log", log_name, ignore_permissions=True)
-		except Exception as e:
-			print(f"M365 Email: Failed to delete log {log_name}: {str(e)}")
-
+	print(f"M365 Email: Deleting {oldLogCount} old log(s)")
+	frappe.db.delete(SYNC_LOG_DOCTYPE, oldLogFilter)
 	frappe.db.commit()
 
 	print("M365 Email: Cleanup completed")
