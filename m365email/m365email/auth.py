@@ -89,12 +89,61 @@ def get_access_token(service_principal_name, force_refresh=False):
 		
 		return result["access_token"]
 	else:
-		error_msg = result.get("error_description", result.get("error", "Unknown error"))
+		raw_error = result.get("error_description", result.get("error", "Unknown error"))
+		error_msg = FlattenTokenErrorValue(raw_error)
 		frappe.log_error(
 			title=f"M365 Token Acquisition Failed: {service_principal_name}",
-			message=f"Error: {error_msg}\nFull response: {json.dumps(result, indent=2)}"
+			message=f"Error: {error_msg}\nResponse: {SummarizeTokenError(result)}"
 		)
 		frappe.throw(_("Failed to acquire access token: {0}").format(error_msg))
+
+
+# NOTE: Only these named fields of a failed sign-in reply reach the Error Log. Logging the
+# whole reply would copy whatever Microsoft or MSAL chooses to put in it into a table any
+# System Manager can read; these are enough to look the failure up with Microsoft.
+LOGGED_TOKEN_ERROR_FIELDS = (
+	"error",
+	"error_description",
+	"error_codes",
+	"timestamp",
+	"trace_id",
+	"correlation_id",
+)
+
+
+
+# NOTE: Each field is also flattened to plain text and numbers and cut to length, so a field
+# that arrives holding a nested block of data cannot carry that block into the log.
+MAX_LOGGED_FIELD_CHARACTERS = 1000
+LOGGED_SCALAR_TYPES = (str, int, float)
+OMITTED_VALUE = "<omitted: not plain text>"
+JSON_INDENT = 2
+
+
+
+def SummarizeTokenError(result: dict) -> str:
+	"""The diagnostic fields of a failed MSAL token reply, as JSON, and nothing else."""
+	summary = {}
+	for field in LOGGED_TOKEN_ERROR_FIELDS:
+		if field in result:
+			summary[field] = FlattenTokenErrorValue(result[field])
+	return json.dumps(summary, indent=JSON_INDENT)
+
+
+
+def FlattenTokenErrorValue(value: object) -> str | list:
+	"""Plain text (or a list of plain text) cut to length; anything nested is omitted."""
+	if isinstance(value, list):
+		return [FlattenScalar(item) for item in value]
+	return FlattenScalar(value)
+
+
+
+def FlattenScalar(value: object) -> str:
+	if isinstance(value, bool) or not isinstance(value, LOGGED_SCALAR_TYPES):
+		return OMITTED_VALUE
+	return str(value)[:MAX_LOGGED_FIELD_CHARACTERS]
+
 
 
 def get_service_principal_for_email_account(email_account_name):

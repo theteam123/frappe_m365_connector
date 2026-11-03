@@ -21,6 +21,12 @@ LIVE_ADDRESS = "someone@example.com.au"
 
 
 
+def RaiseValidationError(message: str, *args: object, **kwargs: object) -> None:
+	"""Stands in for frappe.throw, which needs a loaded site to show its message."""
+	raise frappe.ValidationError(message)
+
+
+
 def MakeResponse(statusCode: int, errorCode: str = "", retryAfter: str = "") -> MagicMock:
 	response = MagicMock()
 	response.status_code = statusCode
@@ -34,6 +40,12 @@ def MakeResponse(statusCode: int, errorCode: str = "", retryAfter: str = "") -> 
 
 
 class TestMailboxExists(unittest.TestCase):
+
+	def setUp(self) -> None:
+		throwPatcher = patch("frappe.throw", side_effect=RaiseValidationError)
+		throwPatcher.start()
+		self.addCleanup(throwPatcher.stop)
+
 
 	def testLiveMailbox(self) -> None:
 		with patch("m365email.m365email.graph_api.requests.get", return_value=MakeResponse(200)):
@@ -77,8 +89,11 @@ class TestDomainHelpers(unittest.TestCase):
 class TestEnsureM365AccountForUser(unittest.TestCase):
 
 	def setUp(self) -> None:
-		self.getValue = patch("m365email.m365email.provisioning.frappe.db.get_value").start()
-		self.exists = patch("m365email.m365email.provisioning.frappe.db.exists").start()
+		# NOTE: frappe.db only exists once a site is connected, so the whole handle is
+		# replaced rather than patching methods on an object that is not there.
+		database = patch("frappe.db", new=MagicMock()).start()
+		self.getValue = database.get_value
+		self.exists = database.exists
 		findSPTarget = "m365email.m365email.provisioning.FindProvisioningServicePrincipal"
 		self.findSP = patch(findSPTarget).start()
 		self.probe = patch("m365email.m365email.provisioning.ProbeMailbox").start()
