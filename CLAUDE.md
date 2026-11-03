@@ -75,6 +75,7 @@ pipeline for both incoming sync and outgoing send.
 | `graph_api.py` | ~379 | Microsoft Graph API wrapper (messages, attachments, folders, events, send) |
 | `sync.py` | ~406 | Incoming email sync engine — delta tokens, deduplication, Communication creation |
 | `send.py` | ~561 | Outgoing email — intercepts Email Queue, auto-provisioning, MIME building |
+| `draft_mail.py` | ~500 | Outlook DRAFTS with inline pictures (Graph `POST /users/{mailbox}/messages`, needs `Mail.ReadWrite`) plus an unsent `.eml` fallback. Never sends. Console/CLI only, not whitelisted. Run: `cd sites && ../env/bin/python -m m365email.m365email.draft_mail --help`. Claude usage: the `sgc-email-draft` skill |
 | `provisioning.py` | ~140 | Creates outgoing M365 Email Accounts once a mailbox is known to exist; shared by the lazy first-send path in `send.py` and by other apps (the hr app's daily mailbox sync) |
 | `event_sync.py` | ~344 | Calendar event sync with timezone handling |
 | `tasks.py` | ~271 | Scheduled task orchestration |
