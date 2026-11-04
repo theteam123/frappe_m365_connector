@@ -62,6 +62,8 @@ pipeline for both incoming sync and outgoing send.
 |-------|-------|
 | Panel (HTML/JS/CSS, manifests) | `public/sendtoerp/` — bump `?v=N` on `taskpane.html` when the JS/CSS changes |
 | Filing API | `send_to_erp.py` — a Task/To-Do target files the email FIRST, then creates the ToDo with `reference_type = Communication` so the "ToDo Assigned" Notification (tg_custom fixture) can quote the source email |
+| Create support ticket | `send_to_erp.py::FileEmailAsTicket` — the picked "record" is the ticket type; goes through the support app's `CreateTicket`, so a proxy-mode site (staging) creates the ticket ON PRODUCTION. Email text is copied into the description; attachments are added only for users with write on Support Ticket (the helpdesk's own rule) |
+| Create new Contact / Candidate | `CreateRecordFromSender` — reuses a record already holding the sender's email; `FileEmailToRecord` then requires write on it, reused or new |
 | Sign-in | `addin_sso.py` (auth hook: Microsoft JWT or `sterp_` session token) + `addin_session.py` (mint / validate / revoke remembered sessions) |
 | User guide | `docs/send-to-erp-guide.html` |
 

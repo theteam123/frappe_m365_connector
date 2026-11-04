@@ -49,6 +49,21 @@ SECONDARY_FIELDS = {
 TASK_TARGET = "ToDo"
 TASK_TARGET_LABEL = "Task / To-Do"
 
+# Special pseudo-target: raise a new Support Ticket from the email. The "record"
+# the user picks is the ticket type (Issue/Bug, Feature Request, ...). Tickets go
+# through the support app's CreateTicket, so a remote (proxy-mode) site such as
+# staging forwards them to the primary helpdesk exactly as the helpdesk UI does.
+# NOTE: Added for Paul, 2026-11-04.
+TICKET_TARGET = "Support Ticket"
+TICKET_TARGET_LABEL = "Create support ticket"
+TICKET_PRIORITY = "Medium"  # triage sets the real priority on the helpdesk
+TICKET_BODY_MAX_CHARS = 20000  # email text copied into the ticket description
+TICKET_UPLOAD_TIMEOUT_SECONDS = 120  # per attachment, when forwarding to the primary site
+TICKET_UPLOAD_METHOD = "support.support.page.helpdesk.data.ticket.UploadTicketAttachment"
+
+# Targets that are not existing records to search, but something new to create.
+PSEUDO_TARGETS = (TASK_TARGET, TICKET_TARGET)
+
 
 
 @frappe.whitelist()
@@ -89,6 +104,11 @@ def GetPickableDoctypes() -> list[dict]:
 	if frappe.has_permission(TASK_TARGET, "create"):
 		pickable.append({"doctype": TASK_TARGET, "label": _(TASK_TARGET_LABEL)})
 
+	# Sites without the support app have no Support Ticket doctype, so no option.
+	hasTicketDoctype = frappe.db.exists("DocType", TICKET_TARGET)
+	if hasTicketDoctype and frappe.has_permission(TICKET_TARGET, "create"):
+		pickable.append({"doctype": TICKET_TARGET, "label": _(TICKET_TARGET_LABEL)})
+
 	return pickable
 
 
@@ -115,6 +135,10 @@ def SearchTargets(target_doctype: Optional[str] = None, txt: str = "") -> list[d
 	# The Task/To-Do target searches people to assign to, not existing records.
 	if doctype == TASK_TARGET:
 		return _SearchUsers(txt)
+
+	# The support-ticket target lists ticket types, not existing tickets.
+	if doctype == TICKET_TARGET:
+		return SearchTicketTypes(txt)
 
 	if not frappe.has_permission(doctype, "read"):
 		frappe.throw(_("You do not have access to {0}").format(_(doctype)), frappe.PermissionError)
@@ -166,9 +190,11 @@ def FileEmailToRecord(
 	"""File an email and/or its attachments against a record or a new task.
 
 	Args:
-		target_doctype: Filing target — a pickable doctype, or ``ToDo`` to create
-			a new task (in which case ``target_name`` is the assignee's user id).
-		target_name: Record to file against, or the assignee for a Task/To-Do.
+		target_doctype: Filing target — a pickable doctype, ``ToDo`` to create
+			a new task (``target_name`` is the assignee's user id), or
+			``Support Ticket`` to raise a ticket (``target_name`` is the ticket type).
+		target_name: Record to file against, the assignee for a Task/To-Do, or
+			the ticket type for a Support Ticket.
 		subject: Email subject line.
 		sender: Sender email address.
 		recipients: Recipient email addresses (comma separated).
@@ -177,10 +203,10 @@ def FileEmailToRecord(
 		save_email: 1 to record the email itself on the timeline.
 		comment: Optional note — a timeline comment on a record, or the task's
 			description when creating a Task/To-Do.
-		create_new: 1 to create a new Contact (from new_name/new_email) and file
-			against it, instead of using an existing record.
-		new_name: Display name for the new Contact when create_new is set.
-		new_email: Email address for the new Contact when create_new is set.
+		create_new: 1 to create a new Contact or Candidate (from new_name/new_email)
+			and file against it, instead of using an existing record.
+		new_name: Sender's display name for the new record when create_new is set.
+		new_email: Sender's email address for the new record when create_new is set.
 		attachments: JSON list of {file_name, content_base64, content_type}.
 
 	Returns:
@@ -202,13 +228,28 @@ def FileEmailToRecord(
 		"body_html": body_html,
 	}
 
+	# A ticket may live on another site (proxy mode), so it takes its own path.
+	if target_doctype == TICKET_TARGET:
+		return FileEmailAsTicket(
+			target_name, emailFields, shouldSaveEmail, commentText, attachmentList,
+		)
+
 	communicationName = None
 	if isTask:
 		recordDoctype, recordName, communicationName = CreateTaskFromEmail(
 			target_name, commentText, emailFields, shouldSaveEmail,
 		)
 	elif shouldCreateNew:
-		recordDoctype, recordName = _CreateContact(target_doctype, new_name, new_email, body_html)
+		recordDoctype, recordName = CreateRecordFromSender(
+			target_doctype, new_name, new_email, body_html,
+		)
+		# "Create new" may reuse a record already holding the sender's email, and
+		# filing then writes to it, so apply the same write check as a picked record.
+		# The message names no record: the user may not be allowed to read it.
+		# A refusal rolls back a record created in this request.
+		if not frappe.has_permission(recordDoctype, "write", recordName):
+			message = _("You do not have permission to add to the {0} record for this sender.")
+			frappe.throw(message.format(_(recordDoctype)), frappe.PermissionError)
 	else:
 		_GuardTargetExists(target_doctype, target_name)
 		if not frappe.has_permission(target_doctype, "write", target_name):
@@ -261,7 +302,7 @@ def FileEmailToRecord(
 
 def _GuardPickableDoctype(doctype: str) -> None:
 	"""Reject any target not in the pickable allow-list (Task/To-Do included)."""
-	if doctype != TASK_TARGET and doctype not in DEFAULT_PICKABLE_DOCTYPES:
+	if doctype not in PSEUDO_TARGETS and doctype not in DEFAULT_PICKABLE_DOCTYPES:
 		frappe.throw(_("{0} is not available as a filing target.").format(doctype), frappe.PermissionError)
 
 
@@ -737,3 +778,285 @@ def _AddComment(doctype: str, name: str, text: str) -> None:
 	content = frappe.utils.escape_html(text).replace("\n", "<br>")
 	doc = frappe.get_doc(doctype, name)
 	doc.add_comment("Comment", content)
+
+
+
+def CreateRecordFromSender(
+	targetDoctype: str, name: str, email: str, bodyHTML: str,
+) -> tuple[str, str]:
+	"""Create (or reuse) a Contact or Candidate for the open email's sender.
+
+	Returns:
+		(doctype, name) of the record to file the email against.
+	"""
+	if targetDoctype == "Candidate":
+		return CreateCandidate(name, email, bodyHTML)
+
+	return _CreateContact(targetDoctype, name, email, bodyHTML)
+
+
+
+def CreateCandidate(name: str, email: str, bodyHTML: str) -> tuple[str, str]:
+	"""Create a Candidate from an email sender, enriched from the signature.
+
+	An existing candidate with the same email address is reused rather than
+	duplicated. Candidate requires both a first name and a surname, so when
+	neither the sender's display name nor the signature gives both, the user is
+	asked to create the candidate in ERP instead of getting a half-filled record.
+
+	Returns:
+		("Candidate", name) of the existing or new candidate.
+	"""
+	emailAddress = (email or "").strip().lower()
+
+	if emailAddress:
+		existingName = frappe.db.get_value("Candidate", {"email_address": emailAddress}, "name")
+		if existingName:
+			return ("Candidate", existingName)
+
+	if not frappe.has_permission("Candidate", "create"):
+		frappe.throw(_("You do not have permission to create a Candidate."), frappe.PermissionError)
+
+	extracted = _ExtractContactFields(bodyHTML, name, emailAddress)
+	firstName, lastName = SplitSenderName(name, extracted)
+	if not firstName or not lastName:
+		who = name or emailAddress or _("this sender")
+		message = _(
+			"Couldn't work out both a first name and a surname for {0}. "
+			"Please create this candidate in ERP."
+		)
+		frappe.throw(message.format(who))
+
+	candidate = frappe.get_doc({
+		"doctype": "Candidate",
+		"first_name": firstName,
+		"last_name": lastName,
+		"email_address": (extracted.get("email") or emailAddress or "").strip().lower(),
+	})
+	phoneNumber = extracted.get("mobile") or extracted.get("phone")
+	if phoneNumber:
+		candidate.phone_number = phoneNumber
+
+	# Normal permissions apply: the user was checked for Candidate create above.
+	candidate.insert()
+	return ("Candidate", candidate.name)
+
+
+
+def SplitSenderName(name: str, extracted: dict) -> tuple[str, str]:
+	"""Return (first name, surname), preferring the signature over the display name."""
+	nameParts = (name or "").strip().split(" ", 1)
+	fallbackFirst = nameParts[0] if nameParts else ""
+	fallbackLast = nameParts[1].strip() if len(nameParts) > 1 else ""
+
+	firstName = extracted.get("first_name") or fallbackFirst
+	lastName = extracted.get("last_name") or fallbackLast
+	return (firstName.strip(), lastName.strip())
+
+
+
+def GetTicketTypes() -> list[str]:
+	"""Return the Support Ticket types, in the order the doctype lists them."""
+	options = frappe.get_meta(TICKET_TARGET).get_field("support_type").options or ""
+	return [option.strip() for option in options.split("\n") if option.strip()]
+
+
+
+def SearchTicketTypes(txt: str) -> list[dict]:
+	"""List the ticket types matching the typed text, for the add-in picker."""
+	searchText = (txt or "").strip().lower()
+	return [
+		{"value": ticketType, "label": _(ticketType), "sublabel": ""}
+		for ticketType in GetTicketTypes()
+		if searchText in ticketType.lower()
+	]
+
+
+
+def FileEmailAsTicket(
+	supportType: str, email: dict, shouldSaveEmail: bool, comment: str, attachmentList: list[dict],
+) -> dict:
+	"""Raise a Support Ticket from the open email.
+
+	The ticket goes through the support app's own CreateTicket, so on a remote
+	(proxy-mode) site it is created on the primary helpdesk, exactly like a
+	ticket raised from the helpdesk page. The email's text is copied into the
+	ticket description, and the chosen attachments are uploaded to the ticket.
+
+	Args:
+		supportType: Ticket type the user picked, e.g. "Issue/Bug".
+		email: {subject, sender, recipients, sent_date, body_html} of the email.
+		shouldSaveEmail: Whether to copy the email itself into the ticket.
+		comment: The user's note, placed at the top of the description.
+		attachmentList: Parsed attachments to upload to the ticket.
+
+	Returns:
+		{success, communication, files, message} like FileEmailToRecord.
+	"""
+	from support.support.page.helpdesk.data.ticket import CreateTicket
+
+	if not frappe.has_permission(TICKET_TARGET, "create"):
+		message = _("You do not have permission to raise a support ticket.")
+		frappe.throw(message, frappe.PermissionError)
+	if supportType not in GetTicketTypes():
+		frappe.throw(_("Choose a ticket type."))
+	if not shouldSaveEmail and not comment:
+		frappe.throw(_("Add a comment, or include the email, so the ticket says what is needed."))
+
+	user = frappe.session.user
+	ticket = CreateTicket(
+		subject=email["subject"] or _("(no subject)"),
+		description=BuildTicketDescription(email, comment, shouldSaveEmail),
+		supportType=supportType,
+		priorityLevel=TICKET_PRIORITY,
+		raised_by_user=user,
+		raised_by_email=frappe.db.get_value("User", user, "email") or user,
+	)
+	ticketName = (ticket or {}).get("name")
+	if not ticketName:
+		frappe.throw(_("The support ticket could not be created."))
+
+	canAttach = CanAttachToTicket(ticketName)
+	attachedFiles = AttachFilesToTicket(ticketName, attachmentList) if canAttach else []
+	frappe.db.commit()
+
+	return {
+		"success": True,
+		"communication": None,
+		"files": attachedFiles,
+		"message": BuildTicketSummary(ticketName, attachmentList, attachedFiles, canAttach),
+	}
+
+
+
+def CanAttachToTicket(ticketName: str) -> bool:
+	"""True when the user may add files to the ticket, under the helpdesk's own rule.
+
+	The helpdesk's upload refuses anyone without write on the ticket, and the
+	"All" role can create and read its own tickets but not write them. The
+	add-in applies the same rule rather than slipping files in on its behalf.
+	On a proxy-mode site the ticket lives on the primary, so the check is the
+	user's write permission on Support Tickets in general.
+	"""
+	from support.support.utils.remote import IsProxyMode
+
+	if IsProxyMode():
+		return bool(frappe.has_permission(TICKET_TARGET, "write"))
+	return bool(frappe.has_permission(TICKET_TARGET, "write", ticketName))
+
+
+
+def BuildTicketDescription(email: dict, comment: str, shouldSaveEmail: bool) -> str:
+	"""Build the ticket description HTML: who raised it, their note, then the email.
+
+	The email body is reduced to plain text (Outlook HTML is heavy and full of
+	styling) and every value is escaped before it goes into the HTML.
+	"""
+	escape = frappe.utils.escape_html
+	fullName = frappe.utils.get_fullname(frappe.session.user)
+	parts = ["<p>{0}</p>".format(escape(_("Raised from Outlook by {0}.").format(fullName)))]
+
+	if comment:
+		parts.append("<p>{0}</p>".format(escape(comment).replace("\n", "<br>")))
+
+	if not shouldSaveEmail:
+		return "".join(parts)
+
+	from frappe.core.utils import html2text
+
+	sentOn = frappe.utils.format_datetime(_ParseEmailDate(email["sent_date"]))
+	headerLines = [
+		"<strong>{0}</strong>".format(escape(_("Original email"))),
+		escape(_("From: {0}").format(email["sender"])),
+		escape(_("To: {0}").format(email["recipients"])),
+		escape(_("Sent: {0}").format(sentOn)),
+		escape(_("Subject: {0}").format(email["subject"])),
+	]
+	bodyText = html2text(email["body_html"] or "")[:TICKET_BODY_MAX_CHARS]
+	parts.append("<hr><p>{0}</p>".format("<br>".join(headerLines)))
+	parts.append("<p>{0}</p>".format(escape(bodyText).replace("\n", "<br>")))
+	return "".join(parts)
+
+
+
+def AttachFilesToTicket(ticketName: str, attachmentList: list[dict]) -> list[dict]:
+	"""Attach files to the ticket, forwarding them when the ticket lives on the primary site.
+
+	A failed upload is logged and skipped, not raised: the ticket already exists
+	by then, and the summary tells the user which files did not make it.
+
+	Returns:
+		List of {file_name, file_url} that were attached.
+	"""
+	from support.support.utils.remote import GetRemoteConfig, IsProxyMode
+
+	if not attachmentList:
+		return []
+	if not IsProxyMode():
+		return _AttachFiles(attachmentList, TICKET_TARGET, ticketName)
+
+	config = GetRemoteConfig()
+	attached = []
+	for item in attachmentList:
+		fileName = item.get("file_name") or "attachment"
+		content = item.get("content_base64")
+		if not content:
+			continue
+		if UploadFileToPrimaryTicket(config, ticketName, fileName, base64.b64decode(content)):
+			attached.append({"file_name": fileName, "file_url": ""})
+
+	return attached
+
+
+
+def UploadFileToPrimaryTicket(config: dict, ticketName: str, fileName: str, content: bytes) -> bool:
+	"""Upload one file to a ticket on the primary helpdesk site. Returns True on success."""
+	import requests
+
+	url = "https://{0}/api/method/{1}".format(config["remoteSiteUrl"], TICKET_UPLOAD_METHOD)
+	headers = {"Authorization": "token {0}:{1}".format(config["apiKey"], config["apiSecret"])}
+	try:
+		response = requests.post(
+			url,
+			headers=headers,
+			files={"file": (fileName, content)},
+			data={"ticketName": ticketName},
+			timeout=TICKET_UPLOAD_TIMEOUT_SECONDS,
+		)
+	except requests.RequestException as uploadError:
+		# Log the error class only: some requests errors (e.g. InvalidHeader) quote
+		# the Authorization header, which carries the support API key and secret.
+		message = "Upload of {0} to {1} failed: {2}".format(fileName, ticketName, type(uploadError).__name__)
+		frappe.log_error(message, "Send-to-ERP ticket attachment upload failed")
+		return False
+
+	if response.ok:
+		return True
+
+	# Log the status only: the response body may echo request details.
+	frappe.log_error(
+		"Upload of {0} to {1} returned HTTP {2}".format(fileName, ticketName, response.status_code),
+		"Send-to-ERP ticket attachment upload failed",
+	)
+	return False
+
+
+
+def BuildTicketSummary(
+	ticketName: str, attachmentList: list[dict], attachedFiles: list[dict], canAttach: bool,
+) -> str:
+	"""Build the confirmation shown in the panel after a ticket is raised."""
+	wantedCount = len([item for item in attachmentList if item.get("content_base64")])
+	attachedCount = len(attachedFiles)
+
+	message = _("Created support ticket {0}.").format(ticketName)
+	if wantedCount and not canAttach:
+		notAllowedText = _("Attachments were not added: only support staff can attach files to tickets.")
+		return message + " " + notAllowedText
+	if attachedCount:
+		message += " " + _("{0} attachment(s) added.").format(attachedCount)
+	if attachedCount < wantedCount:
+		missedCount = wantedCount - attachedCount
+		missedText = _("{0} attachment(s) could not be added; please add them on the ticket.")
+		message += " " + missedText.format(missedCount)
+	return message
