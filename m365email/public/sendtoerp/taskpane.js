@@ -23,7 +23,9 @@ const AUTH_FAILURE_STATUSES = [401, 403];         // ERP rejected the bearer tok
 const SEARCH_DEBOUNCE_MS = 250;
 const MIN_SEARCH_CHARS = 1;
 const TASK_TYPE = "ToDo";      // the "Task / To-Do" target searches people, not records
-const CONTACT_TYPE = "Contact";  // the only target that offers "create new"
+const TICKET_TYPE = "Support Ticket";  // the "Create support ticket" target lists ticket types
+// Targets that offer "create new" from the email's sender, with the word used in the panel.
+const CREATABLE_TYPES = { "Contact": "contact", "Candidate": "candidate" };
 
 // Microsoft 365 sign-in (Nested App Authentication). These are public OAuth
 // identifiers for the existing m365email Azure app — not secrets.
@@ -399,39 +401,57 @@ async function populateDoctypes() {
 }
 
 
-// Switch the picker between filing to a record and assigning a Task/To-Do.
+// Picker wording per mode: filing to a record, assigning a task, or raising a ticket.
+const MODE_TEXT = {
+	[TASK_TYPE]: { find: "Assign to", placeholder: "Search people…", button: "Create task" },
+	[TICKET_TYPE]: {
+		find: "Ticket type", placeholder: "Filter ticket types…", button: "Create support ticket",
+	},
+};
+const RECORD_MODE_TEXT = { find: "Find record", placeholder: "Start typing…", button: "Attach to ERP" };
+
+
+// Switch the picker between filing to a record, assigning a Task/To-Do, and
+// raising a support ticket.
 function updateModeForType() {
 	const doctype = $("doctype").value;
-	const isTask = doctype === TASK_TYPE;
-	$("findLabel").textContent = isTask ? "Assign to" : "Find record";
-	$("search").placeholder = isTask ? "Search people…" : "Start typing…";
-	$("fileBtn").textContent = isTask ? "Create task" : "Attach to ERP";
+	const modeText = MODE_TEXT[doctype] || RECORD_MODE_TEXT;
+	$("findLabel").textContent = modeText.find;
+	$("search").placeholder = modeText.placeholder;
+	$("fileBtn").textContent = modeText.button;
 	$("search").value = "";
 	$("results").innerHTML = "";
 	hide("chosen");
 	state.target = null;
 
-	// Only Contact offers creating a brand-new record (from the email's sender).
-	if (doctype === CONTACT_TYPE) {
+	// Contact and Candidate offer creating a brand-new record from the email's sender.
+	const createWord = CREATABLE_TYPES[doctype];
+	if (createWord) {
 		const who = state.senderName || state.senderEmail || "this sender";
-		$("createNew").textContent = `➕ Create new contact: ${who}`;
+		$("createNew").textContent = `➕ Create new ${createWord}: ${who}`;
 		show("createNew");
 	} else {
 		hide("createNew");
 	}
+
+	// There are only a handful of ticket types, so list them straight away.
+	if (doctype === TICKET_TYPE) runSearch("");
 	refreshFileButton();
 }
 
 
-// Choose to create a new Contact from the open email's sender, instead of an
-// existing record.
+// Choose to create a new Contact or Candidate from the open email's sender,
+// instead of an existing record.
 function chooseCreateNew() {
-	const who = state.senderName || state.senderEmail || "new contact";
-	state.target = { doctype: CONTACT_TYPE, value: "", label: who, create: true };
+	const doctype = $("doctype").value;
+	const createWord = CREATABLE_TYPES[doctype];
+	if (!createWord) return;
+	const who = state.senderName || state.senderEmail || `new ${createWord}`;
+	state.target = { doctype, value: "", label: who, create: true };
 	$("results").innerHTML = "";
 	$("search").value = "";
 	hide("createNew");
-	$("chosen").textContent = `→ New contact: ${who}`;
+	$("chosen").textContent = `→ New ${createWord}: ${who}`;
 	show("chosen");
 	refreshFileButton();
 }
@@ -441,7 +461,9 @@ let searchTimer = null;
 function onSearchInput() {
 	clearTimeout(searchTimer);
 	const txt = $("search").value.trim();
-	if (txt.length < MIN_SEARCH_CHARS) { $("results").innerHTML = ""; return; }
+	const isTicket = $("doctype").value === TICKET_TYPE;
+	// Ticket types are a short list: an empty box shows them all again.
+	if (!isTicket && txt.length < MIN_SEARCH_CHARS) { $("results").innerHTML = ""; return; }
 	searchTimer = setTimeout(() => runSearch(txt), SEARCH_DEBOUNCE_MS);
 }
 
@@ -461,6 +483,8 @@ async function runSearch(txt) {
 	setResultsMessage("Searching…");
 	try {
 		const rows = await apiGet("SearchTargets", { target_doctype: doctype, txt });
+		// The user switched type while this search was in flight: drop the stale results.
+		if ($("doctype").value !== doctype) return;
 		const list = $("results");
 		list.innerHTML = "";
 		if (!rows || !rows.length) {
@@ -501,10 +525,14 @@ function chooseTarget(doctype, row) {
 function refreshFileButton() {
 	const hasAttachmentsSelected = state.attachments.some(a => a.selected);
 	const wantsEmail = $("saveEmail").checked;
-	const isTask = $("doctype").value === TASK_TYPE;
-	// For a task, choosing the assignee is enough; for a record, also require the
-	// email, an attachment, or a comment.
-	const hasContent = isTask || hasAttachmentsSelected || wantsEmail || $("comment").value.trim() !== "";
+	const doctype = $("doctype").value;
+	const hasComment = $("comment").value.trim() !== "";
+	// For a task, choosing the assignee is enough. A ticket needs something to
+	// describe it: the email or a comment. A record needs the email, an
+	// attachment, or a comment.
+	let hasContent = hasAttachmentsSelected || wantsEmail || hasComment;
+	if (doctype === TASK_TYPE) hasContent = true;
+	if (doctype === TICKET_TYPE) hasContent = wantsEmail || hasComment;
 	$("fileBtn").disabled = !state.target || !hasContent;
 }
 
