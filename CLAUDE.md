@@ -78,6 +78,7 @@ pipeline for both incoming sync and outgoing send.
 | `sync.py` | ~406 | Incoming email sync engine — delta tokens, deduplication, Communication creation |
 | `send.py` | ~561 | Outgoing email — intercepts Email Queue, auto-provisioning, MIME building |
 | `draft_mail.py` | ~500 | Outlook DRAFTS with inline pictures (Graph `POST /users/{mailbox}/messages`, needs `Mail.ReadWrite`) plus an unsent `.eml` fallback. Never sends. Console/CLI only, not whitelisted. Run: `cd sites && ../env/bin/python -m m365email.m365email.draft_mail --help`. Claude usage: the `sgc-email-draft` skill |
+| `mailbox_folder.py` | ~150 | Puts a ready-made, received-looking (non-draft, unread, back-dated) email straight into a folder named by path, e.g. `Inbox/Bulk SMS` (`FileMessageInFolder`, `FindFolderByPath`). Needs `Mail.ReadWrite`. Server-side only, not whitelisted. First caller: notify's SMS-reply copy |
 | `provisioning.py` | ~140 | Creates outgoing M365 Email Accounts once a mailbox is known to exist; shared by the lazy first-send path in `send.py` and by other apps (the hr app's daily mailbox sync) |
 | `event_sync.py` | ~344 | Calendar event sync with timezone handling |
 | `tasks.py` | ~271 | Scheduled task orchestration |
