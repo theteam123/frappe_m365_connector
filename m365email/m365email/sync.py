@@ -13,6 +13,7 @@ from frappe import _
 from datetime import datetime
 from m365email.m365email.auth import get_access_token
 from m365email.m365email.graph_api import (
+	FOLDER_NAME_MAP,
 	get_messages_delta,
 	get_message_details,
 	get_message_attachments,
@@ -174,13 +175,32 @@ def sync_folder_for_email_account(email_account, folder_name, access_token, sync
 
 	delta_token = delta_tokens.get(folder_name)
 
-	# Fetch messages using delta query
-	response = get_messages_delta(
-		email_account.email_id,  # Email Account uses email_id, not email_address
-		access_token,
-		folder=folder_name,
-		delta_token=delta_token
-	)
+	# NOTE: Graph's delta endpoint takes a well-known folder name or a folder id, never a
+	# display name, so a custom folder such as "Inbox/Credentials" is resolved to its id for
+	# the first sync. Later syncs reuse the stored delta link and need no lookup.
+	isFirstSync = not (delta_token and delta_token.startswith("http"))
+	try:
+		deltaFolder = folder_name
+		if isFirstSync:
+			deltaFolder = ResolveDeltaFolder(email_account.email_id, folder_name, access_token)
+
+		# Fetch messages using delta query
+		response = get_messages_delta(
+			email_account.email_id,  # Email Account uses email_id, not email_address
+			access_token,
+			folder=deltaFolder,
+			delta_token=delta_token
+		)
+	except Exception as error:
+		if IsWellKnownFolder(folder_name):
+			raise
+		# NOTE: a custom folder renamed or deleted (before or after its first sync) must not stop
+		# the mailbox's other folders syncing. Built-in folders still fail the sync, as before.
+		frappe.log_error(
+			title="M365 Folder Sync Skipped",
+			message=f"Account: {email_account.name}\nFolder: {folder_name}\nError: {error}"
+		)
+		return {"fetched": 0, "created": 0, "updated": 0, "failed": 1, "communications": []}
 
 	messages = response.get("value", [])
 	fetched = len(messages)
@@ -217,7 +237,7 @@ def sync_folder_for_email_account(email_account, folder_name, access_token, sync
 
 			# Create communication from message
 			comm = create_communication_from_message_for_email_account(
-				message, email_account, access_token
+				message, email_account, access_token, folderName=folder_name
 			)
 			if comm:
 				created += 1
@@ -257,7 +277,33 @@ def sync_folder_for_email_account(email_account, folder_name, access_token, sync
 	}
 
 
-def create_communication_from_message_for_email_account(message, email_account, access_token):
+def IsWellKnownFolder(folderName: str | None) -> bool:
+	"""True for Outlook's built-in folders (Inbox, Sent Items, ...), which always exist."""
+	return (folderName or "").strip().lower() in FOLDER_NAME_MAP
+
+
+
+def ResolveDeltaFolder(mailbox: str, folderName: str, accessToken: str) -> str:
+	"""The folder segment for a delta query: well-known names as given, any other path as its id."""
+	from m365email.m365email.mailbox_folder import FindFolderByPath
+
+	if IsWellKnownFolder(folderName):
+		return folderName
+	try:
+		return FindFolderByPath(mailbox, folderName, accessToken)
+	except Exception:
+		# NOTE: Folder filters may already hold a Graph folder id rather than a name; those
+		# worked before names were resolved, so an unmatched value is passed on as given.
+		return folderName
+
+
+
+def create_communication_from_message_for_email_account(
+	message,
+	email_account,
+	access_token,
+	folderName: str | None = None,
+):
 	"""
 	Create Communication document from M365 message for Email Account.
 	Adapted version for Email Account doctype.
@@ -318,6 +364,7 @@ def create_communication_from_message_for_email_account(message, email_account, 
 		comm.email_account = email_account.name  # Link to Email Account
 		comm.m365_message_id = message_id
 		comm.m365_email_account = email_account.name  # Custom field for M365 tracking
+		comm.m365_folder = folderName  # Which folder it was synced from; intake plugins route on it
 
 		# Set communication date
 		received_date = message.get("receivedDateTime")
