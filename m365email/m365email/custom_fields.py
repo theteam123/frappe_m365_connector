@@ -301,6 +301,16 @@ def create_m365_custom_fields():
 				"no_copy": 1,
 				"hidden": 1,
 				"description": "User who owns this email for privacy filtering"
+			},
+			{
+				"fieldname": "m365_folder",
+				"label": "M365 Folder",
+				"fieldtype": "Data",
+				"insert_after": "linked_user",
+				"read_only": 1,
+				"no_copy": 1,
+				"hidden": 1,
+				"description": "Mailbox folder this email was synced from, as named in the folder filter (e.g. Inbox/Credentials)"
 			}
 		],
 
