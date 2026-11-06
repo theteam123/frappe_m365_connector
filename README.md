@@ -313,8 +313,17 @@ reverse for leavers. The engine is `m365email/m365email/entra.py`; it knows noth
 - **Three modes.** *Off* refuses everything. *Simulation* (the default) makes no call to
   Microsoft: it pretends the address is free and there are 5 spare licences, and logs every step
   as Simulation. *Live* makes real Graph calls. The staging refresh forces Simulation.
-- **Profiles.** An **M365 Provisioning Profile** is a licence plus a list of groups. Its Match Key
-  lets a caller choose a default (HR uses the onboarding template name).
+- **Profiles.** An **M365 Provisioning Profile** is a licence plus a list of groups. HR picks the
+  default from the employee's **Employment Category** (its *M365 Account Profile* field; blank
+  means no account). The old Match Key field is no longer used by HR.
+- **Welcome email.** After a successful *Live* create, `welcome.py` emails the temporary password
+  to the employee's personal address from the Support mailbox (`welcome_sender`, default
+  support@sgcaustralia.com.au) with one Graph `sendMail` call, using the existing mail service
+  principal (`welcome_mail_service_principal`, needs Mail.Send; the provisioning registration has
+  none). It sets `saveToSentItems` false, never uses frappe.sendmail / Email Queue /
+  Communication (they would store the body) and never logs the body. The outcome is a
+  *Send Welcome Email* log row (recipient domain or reason only). If it is not sent (no personal
+  email, failure) the HR user is shown the password once instead. Simulation sends nothing.
 - **Log.** Every step is a **M365 Provisioning Log** row. It never holds a password or token. It
   is also how the engine knows what the ERP added, so it can resume a half-finished run and undo
   only its own groups and licences.
@@ -323,7 +332,7 @@ reverse for leavers. The engine is `m365email/m365email/entra.py`; it knows noth
   generated on the server, returned once to the caller and never stored or logged.
 - **Graph permissions needed for Live:** User.Create, User.Read.All, User.EnableDisableAccount.All,
   LicenseAssignment.Read.All, LicenseAssignment.ReadWrite.All, Group.Read.All, GroupMember.ReadWrite.All.
-- **Tests:** `cd sites && ../env/bin/python -m unittest m365email.m365email.test_entra`
+- **Tests:** `cd sites && ../env/bin/python -m unittest m365email.m365email.test_entra m365email.m365email.test_welcome`
 
 ## 🚀 Installation
 

@@ -29,7 +29,7 @@
    "fieldname": "action",
    "fieldtype": "Select",
    "label": "Action",
-   "options": "Create Account\nAssign Licence\nAdd Group\nRemove Group\nDisable Account\nRelease Licence\nLookup",
+   "options": "Create Account\nAssign Licence\nAdd Group\nRemove Group\nDisable Account\nRelease Licence\nLookup\nSend Welcome Email",
    "read_only": 1,
    "in_list_view": 1,
    "in_standard_filter": 1

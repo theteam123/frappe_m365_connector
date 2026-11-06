@@ -12,7 +12,10 @@
   "defaults_section",
   "default_domain",
   "usage_location",
-  "force_password_change"
+  "force_password_change",
+  "welcome_section",
+  "welcome_sender",
+  "welcome_mail_service_principal"
  ],
  "fields": [
   {
@@ -67,6 +70,27 @@
    "fieldtype": "Check",
    "label": "Force Password Change at First Sign-in",
    "default": "1"
+  },
+  {
+   "fieldname": "welcome_section",
+   "fieldtype": "Section Break",
+   "label": "Welcome Email",
+   "description": "After a Live account is created, the temporary password is emailed to the employee's personal address. Nothing is sent in Simulation."
+  },
+  {
+   "fieldname": "welcome_sender",
+   "fieldtype": "Data",
+   "options": "Email",
+   "label": "Welcome Email Sender",
+   "default": "support@sgcaustralia.com.au",
+   "description": "The mailbox the welcome email is sent from. A copy is not kept in its Sent Items."
+  },
+  {
+   "fieldname": "welcome_mail_service_principal",
+   "fieldtype": "Link",
+   "options": "M365 Email Service Principal Settings",
+   "label": "Welcome Email Service Principal",
+   "description": "The mail integration's service principal (needs Mail.Send). The provisioning app registration has no mail permission."
   }
  ],
  "links": [],
