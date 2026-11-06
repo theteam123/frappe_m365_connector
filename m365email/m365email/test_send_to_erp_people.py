@@ -163,3 +163,11 @@ class TestCraftedHTML(unittest.TestCase):
 		body = '<div title="' + "x" * 3000 + '\nFrom: fake@example.com\n">Visible text</div>'
 		with patch.object(people.frappe.db, "exists", side_effect=FakeExists):
 			self.assertEqual(people.ReadForwardedSenders(body), [])
+
+
+
+	def test_long_line_break_tag_still_breaks_the_line(self) -> None:
+		body = 'intro<br title="' + "a" * 300 + '">From: real@example.com'
+		with patch.object(people.frappe.db, "exists", side_effect=FakeExists):
+			senders = people.ReadForwardedSenders(body)
+		self.assertEqual([sender["email"] for sender in senders], ["real@example.com"])
