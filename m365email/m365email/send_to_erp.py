@@ -18,6 +18,8 @@ from typing import Callable, Optional
 import frappe
 from frappe import _
 
+from m365email.m365email import send_to_erp_people as people
+
 
 # Doctypes a user may file an email against, in picker order. Each user only
 # sees the subset they have read access to (see GetPickableDoctypes).
@@ -215,6 +217,7 @@ def FileEmailToRecord(
 	project: str = "",
 	supplier: str = "",
 	message_id: str = "",
+	contact: str = "",
 ) -> dict:
 	"""File an email and/or its attachments against a record or a new task.
 
@@ -242,6 +245,10 @@ def FileEmailToRecord(
 			otherwise it is taken from the sender's contact, then the quote PDF).
 		message_id: The email's Internet message id. With it, a "create new" runs once per
 			email: repeating it returns the record already created.
+		contact: A Contact the user picked as the person the email is about (Paul,
+			2026-11-07: often a forwarded email's original sender). The filed email also shows
+			on that Contact's timeline; a new Supplier Quote takes it as supplier contact; a
+			support ticket names it.
 
 	Returns:
 		{success, communication, files, message, record, record_url} describing what was
@@ -254,6 +261,7 @@ def FileEmailToRecord(
 			return FileEmailToRecord(
 				target_doctype, target_name, subject, sender, recipients, sent_date, body_html,
 				save_email, comment, create_new, new_name, new_email, attachments, project, supplier,
+				"", contact,
 			)
 		# NOTE: The job is part of the key, so a quote for a second job is not mistaken for a repeat.
 		return RunOncePerEmail(f"create-{target_doctype}-{project}", message_id, createOnce)
@@ -262,6 +270,7 @@ def FileEmailToRecord(
 	attachmentList = _ParseAttachments(attachments)
 	commentText = (comment or "").strip()
 	isTask = target_doctype == TASK_TARGET
+	contactName = people.ResolveChosenContact(contact)
 	shouldCreateNew = bool(int(create_new or 0))
 
 	emailFields = {
@@ -274,6 +283,10 @@ def FileEmailToRecord(
 
 	# A ticket may live on another site (proxy mode), so it takes its own path.
 	if target_doctype == TICKET_TARGET:
+		aboutWhom = people.DescribeContact(contactName)
+		if aboutWhom:
+			aboutLine = _("About: {0}").format(aboutWhom)
+			commentText = "\n".join(part for part in (aboutLine, commentText) if part)
 		return FileEmailAsTicket(
 			target_name, emailFields, shouldSaveEmail, commentText, attachmentList,
 		)
@@ -291,6 +304,7 @@ def FileEmailToRecord(
 			# NOTE: Not called "sender": that is this endpoint's sender address, used below.
 			senderDetails = {
 				"name": new_name, "email": new_email, "body_html": body_html, "sent_date": sent_date,
+				"contact": contactName or "",
 			}
 			recordDoctype, recordName, creationNote = CreateSupplierQuoteFromEmail(
 				project, supplier, senderDetails, attachmentList,
@@ -337,6 +351,8 @@ def FileEmailToRecord(
 			recordDoctype, recordName, subject, sender, recipients, sent_date,
 			_AppendAttachmentLinks(emailBody, createdFiles),
 		)
+		if recordDoctype != people.CONTACT:
+			people.LinkEmailToContact(communicationName, contactName)
 
 	# A comment with no email to ride along becomes a standalone timeline comment.
 	# (A task already carries the comment as its description.)
