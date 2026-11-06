@@ -19,6 +19,7 @@
 const API_BASE = "/api/method/m365email.m365email.send_to_erp.";
 const SESSION_API_BASE = "/api/method/m365email.m365email.addin_session.";
 const PROCUREMENT_API_BASE = "/api/method/m365email.m365email.send_to_erp_procurement.";
+const PEOPLE_API_BASE = "/api/method/m365email.m365email.send_to_erp_people.";
 const SESSION_STORAGE_KEY = "sendtoerp.session"; // {token, user, expires_on} in localStorage
 const AUTH_FAILURE_STATUSES = [401, 403]; // ERP rejected the bearer token
 const SEARCH_DEBOUNCE_MS = 250;
@@ -34,6 +35,10 @@ const CREATABLE_TYPES = {
 	[QUOTE_TYPE]: "supplier quote",
 };
 const PROJECT_TYPE = "Project"; // a new Supplier Quote's job is picked from Projects
+const CONTACT_TYPE = "Contact";
+// Types that ARE a person (or a task), so they get no separate contact picker (Paul,
+// 2026-11-07: every other option lets the user say which Contact the email is about).
+const NO_CONTACT_PICKER_TYPES = ["Contact", "Candidate", "Employee", "ToDo"];
 const DATE_PART_WIDTH = 2; // month and day in YYYY-MM-DD
 const PDF_NAME_PATTERN = /\.pdf$/i;
 const INVOICE_WORD_PATTERN = /invoice/i;
@@ -61,8 +66,13 @@ const state = {
 	project: null, // {value, label} — the job for a new Supplier Quote
 	supplier: null, // {value, label} — the supplier for a new Supplier Quote, when picked or known
 	suggestionRun: 0, // increments per PO suggestion, so a stale reply is ignored
-	senderName: "", // open email's sender display name (for "create new contact")
-	senderEmail: "", // open email's sender address
+	senderName: "", // the person the email is from: a forwarded email's original sender
+	senderEmail: "", // that person's address
+	person: null, // {name, email, is_forwarded, is_internal} — the server's best guess
+	contact: null, // {value, label, sublabel} — the Contact this email is about, editable
+	guessedSupplier: null, // {value, label} — the supplier the person works for, if known
+	peopleRun: 0, // increments per supplier re-guess, so a stale reply is ignored
+	isDone: false, // the current choice has been filed: the button stays greyed until it changes
 };
 
 // Microsoft 365 sign-on. On desktop Outlook the Office host brokers a token
@@ -179,9 +189,13 @@ function handleDialogToken(arg, dialog, resolve, reject) {
 	}
 }
 
-// Methods live under send_to_erp unless given as "session:<Method>" or "procurement:<Method>".
+// Methods live under send_to_erp unless given as "session:", "procurement:" or "people:".
 function apiUrl(method) {
-	const prefixes = { "session:": SESSION_API_BASE, "procurement:": PROCUREMENT_API_BASE };
+	const prefixes = {
+		"session:": SESSION_API_BASE,
+		"procurement:": PROCUREMENT_API_BASE,
+		"people:": PEOPLE_API_BASE,
+	};
 	const prefix = Object.keys(prefixes).find((candidate) => method.startsWith(candidate));
 	if (!prefix) return API_BASE + method;
 	return prefixes[prefix] + method.slice(prefix.length);
@@ -465,11 +479,13 @@ const RECORD_MODE_TEXT = {
 	button: "Attach to ERP",
 };
 const INVOICE_BUTTON_TEXT = "Enter Supplier Invoice";
+const DONE_BUTTON_TEXT = "✓ Done";
 const QUOTE_BUTTON_TEXT = "Create supplier quote";
 
 // Switch the picker between filing to a record, assigning a Task/To-Do, and
 // raising a support ticket.
 function updateModeForType() {
+	clearDone();
 	const doctype = $("doctype").value;
 	const modeText = MODE_TEXT[doctype] || RECORD_MODE_TEXT;
 	$("findLabel").textContent = modeText.find;
@@ -482,8 +498,10 @@ function updateModeForType() {
 	hide("quoteFields");
 	hide("invoiceFields");
 	hide("openRecord");
+	hide("personEdit");
 	state.target = null;
 	state.suggestionRun += 1;
+	refreshPersonFields(doctype);
 
 	// Contact, Candidate and Supplier Quote offer creating a brand-new record from the email.
 	const createWord = CREATABLE_TYPES[doctype];
@@ -498,6 +516,11 @@ function updateModeForType() {
 
 	// There are only a handful of ticket types, so list them straight away.
 	if (doctype === TICKET_TYPE) runSearch("");
+	// For Contact, look up the person the email is about straight away.
+	if (doctype === CONTACT_TYPE && state.senderEmail) {
+		$("search").value = state.senderEmail;
+		runSearch(state.senderEmail);
+	}
 	// A supplier's invoice quotes our PO number: find it and preselect the order.
 	if (doctype === ORDER_TYPE) {
 		fillInvoiceDetails({}, emailMeta().subject);
@@ -638,6 +661,7 @@ async function runPickerSearch(prefix, search, onChoose, txt) {
 }
 
 function chooseProject(row) {
+	clearDone();
 	state.project = { value: row.value, label: row.label };
 	$("projectChosen").textContent = `→ ${row.label}`;
 	show("projectChosen");
@@ -645,7 +669,10 @@ function chooseProject(row) {
 }
 
 function chooseSupplier(row) {
+	clearDone();
 	state.supplier = { value: row.value, label: row.label };
+	$("supplierResults").innerHTML = "";
+	$("supplierSearch").value = "";
 	$("supplierChosen").textContent = `→ ${row.label}`;
 	show("supplierChosen");
 	$("supplierHint").textContent = "Change it by searching below.";
@@ -658,28 +685,30 @@ async function showQuoteFields() {
 	state.supplier = null;
 	hide("projectChosen");
 	hide("supplierChosen");
-	$("supplierHint").textContent = "Checking the sender's company…";
 	show("quoteFields");
-	try {
-		const known = await apiGet("procurement:GetSenderSupplier", {
-			sender_email: state.senderEmail,
-		});
-		if (known && known.supplier) {
-			chooseSupplier(known.supplier);
-			$("supplierHint").textContent =
-				"From the sender's contact. Change it by searching below.";
-			return;
-		}
-	} catch {
-		/* fall through: the user can still pick, or let the PDF decide */
+	applyGuessedSupplier();
+}
+
+// Fill the supplier from the contact's company or email domain, unless the user picked one.
+function applyGuessedSupplier() {
+	if (state.supplier && !state.supplier.guessed) return;
+	if (state.guessedSupplier) {
+		chooseSupplier(state.guessedSupplier);
+		state.supplier.guessed = true;
+		$("supplierHint").textContent =
+			"From the contact's company or email address. Change it by searching below.";
+		return;
 	}
+	state.supplier = null;
+	hide("supplierChosen");
 	$("supplierHint").textContent =
-		"Not known from the sender. Pick it, or leave it blank to read it from the quote PDF.";
+		"Not known from the contact. Pick it, or leave it blank to read it from the quote PDF.";
 }
 
 // Choose to create a new Contact or Candidate from the open email's sender,
 // instead of an existing record.
 function chooseCreateNew() {
+	clearDone();
 	const doctype = $("doctype").value;
 	const createWord = CREATABLE_TYPES[doctype];
 	if (!createWord) return;
@@ -694,7 +723,19 @@ function chooseCreateNew() {
 			: `→ New ${createWord}: ${who}`;
 	show("chosen");
 	if (doctype === QUOTE_TYPE) showQuoteFields();
+	if (doctype !== QUOTE_TYPE) showPersonEdit(createWord);
 	refreshFileButton();
+}
+
+// A new Contact or Candidate is for the person the email is about, which the user can correct.
+function showPersonEdit(createWord) {
+	$("personName").value = state.senderName;
+	$("personEmail").value = state.senderEmail;
+	const isForwarded = state.person && state.person.is_forwarded;
+	$("personEditHint").textContent = isForwarded
+		? `Taken from the forwarded email's original sender. Correct them if needed.`
+		: `The new ${createWord}'s details. Correct them if needed.`;
+	show("personEdit");
 }
 
 let searchTimer = null;
@@ -763,6 +804,7 @@ async function runSearch(txt) {
 }
 
 function chooseTarget(doctype, row) {
+	clearDone();
 	state.target = { doctype, value: row.value, label: row.label, create: false };
 	$("results").innerHTML = "";
 	$("search").value = "";
@@ -790,8 +832,23 @@ function refreshFileButton() {
 	const isNewQuote = doctype === QUOTE_TYPE && state.target && state.target.create;
 	if (isNewQuote) hasContent = hasContent && Boolean(state.project);
 	if (isEnteringInvoice()) hasContent = $("invoiceNumber").value.trim() !== "";
+	// Paul, 2026-11-07: after success the button greys out and says so, so nobody presses it
+	// again thinking nothing happened. Choosing something else brings it back.
+	if (state.isDone) {
+		$("fileBtn").disabled = true;
+		$("fileBtn").textContent = DONE_BUTTON_TEXT;
+		return;
+	}
 	$("fileBtn").disabled = !state.target || !hasContent;
 	$("fileBtn").textContent = buttonText(doctype, isNewQuote);
+}
+
+// Something new was chosen after a success: the button is live again.
+function clearDone() {
+	if (!state.isDone) return;
+	state.isDone = false;
+	hide("openRecord");
+	setStatus("", "");
 }
 
 function buttonText(doctype, isNewQuote) {
@@ -821,6 +878,7 @@ async function onFile() {
 		const result = isInvoice ? await enterSupplierInvoice(common) : await fileToRecord(common);
 		setStatus(result.message || "Done.", "ok");
 		showOpenRecord(result.record_url);
+		state.isDone = true;
 	} catch (e) {
 		setStatus(e.message || "Something went wrong.", "err");
 	} finally {
@@ -838,8 +896,9 @@ function fileToRecord(common) {
 				target_doctype: state.target.doctype,
 				target_name: state.target.value,
 				create_new: isCreate ? 1 : 0,
-				new_name: isCreate ? state.senderName : "",
-				new_email: isCreate ? state.senderEmail : "",
+				new_name: isCreate ? personValue("personName", state.senderName) : "",
+				new_email: isCreate ? personValue("personEmail", state.senderEmail) : "",
+				contact: chosenContact(),
 				project: isCreate && state.project ? state.project.value : "",
 				supplier: isCreate && state.supplier ? state.supplier.value : "",
 			},
@@ -857,10 +916,95 @@ function enterSupplierInvoice(common) {
 				supplier_invoice_number: $("invoiceNumber").value.trim(),
 				invoice_date: $("invoiceDate").value,
 				due_date: $("dueDate").value,
+				contact: chosenContact(),
 			},
 			common
 		)
 	);
+}
+
+// The name or email typed in the "new person" boxes, or the guess when they are hidden.
+function personValue(inputId, fallback) {
+	if ($("personEdit").classList.contains("hidden")) return fallback;
+	return $(inputId).value.trim();
+}
+
+// The Contact picked for this email, when the contact picker is in use.
+function chosenContact() {
+	if ($("personFields").classList.contains("hidden") || !state.contact) return "";
+	return state.contact.value;
+}
+
+/* ---- The person an email is about (Paul, 2026-11-07) ---- */
+
+// Ask ERP who the email is really from: a colleague's forward names the original sender.
+async function guessPeople() {
+	const from = Office.context.mailbox.item.from || Office.context.mailbox.item.sender || {};
+	try {
+		const guess = await apiPost("people:GuessPeople", {
+			sender_name: from.displayName || "",
+			sender_email: from.emailAddress || "",
+			body_html: await getEmailBodyHtml(),
+		});
+		state.person = guess.person;
+		state.senderName = guess.person.name || guess.person.email || "";
+		state.senderEmail = guess.person.email || "";
+		state.contact = guess.contact;
+		state.guessedSupplier = guess.supplier;
+	} catch {
+		/* keep the Outlook sender: the user can still pick the contact */
+	}
+}
+
+// Show the contact picker on the types that are not themselves a person.
+function refreshPersonFields(doctype) {
+	if (NO_CONTACT_PICKER_TYPES.includes(doctype)) {
+		hide("personFields");
+		return;
+	}
+	renderChosenContact();
+	show("personFields");
+}
+
+function renderChosenContact() {
+	$("personHint").textContent = describePerson();
+	if (!state.contact) {
+		hide("contactChosen");
+		return;
+	}
+	const contact = state.contact;
+	$("contactChosen").textContent = `→ ${contact.label}${
+		contact.sublabel && contact.sublabel !== contact.label ? " · " + contact.sublabel : ""
+	}`;
+	show("contactChosen");
+}
+
+function describePerson() {
+	const person = state.person;
+	if (!person || !person.email) return "Search for the contact this email is about.";
+	const who = person.name ? `${person.name} <${person.email}>` : person.email;
+	if (person.is_internal) return `Sent by a colleague (${who}). Pick the contact it is about.`;
+	const source = person.is_forwarded ? "Original sender of this forwarded email" : "Sender";
+	const found = state.contact ? "" : " No contact holds this address yet.";
+	return `${source}: ${who}.${found}`;
+}
+
+// The user picked a different contact. On a new quote, re-guess the supplier from it.
+async function chooseContact(row) {
+	clearDone();
+	state.contact = { value: row.value, label: row.label, sublabel: row.sublabel || "" };
+	renderChosenContact();
+	if (!state.target || !state.target.create || state.target.doctype !== QUOTE_TYPE) return;
+	if (!row.sublabel) return;
+	const run = ++state.peopleRun;
+	try {
+		const guess = await apiPost("people:GuessPeople", { sender_email: row.sublabel });
+		if (run !== state.peopleRun) return;
+		state.guessedSupplier = guess.supplier;
+		applyGuessedSupplier();
+	} catch {
+		/* keep the current supplier */
+	}
 }
 
 // Offer to open the record just created or filed to, in the user's browser.
@@ -895,6 +1039,7 @@ async function enterFilingView(user) {
 	state.senderEmail = from.emailAddress || "";
 	readAttachments();
 	renderAttachments();
+	await guessPeople();
 	await populateDoctypes();
 	refreshFileButton();
 }
@@ -941,6 +1086,11 @@ function wireEvents() {
 		"supplier",
 		(txt) => apiGet("procurement:SearchSuppliers", { txt }),
 		chooseSupplier
+	);
+	wirePicker(
+		"contact",
+		(txt) => apiGet("SearchTargets", { target_doctype: CONTACT_TYPE, txt }),
+		chooseContact
 	);
 }
 

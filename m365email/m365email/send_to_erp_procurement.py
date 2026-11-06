@@ -27,13 +27,13 @@ import frappe
 from frappe import _
 
 from m365email.m365email import send_to_erp as filing
+from m365email.m365email import send_to_erp_people as people
 
 SUPPLIER_QUOTE = "Supplier Quote"
 PURCHASE_ORDER = "Purchase Order"
 PURCHASE_INVOICE = "Purchase Invoice"
 ORGANISATION = "Organisation"
 CONTACT = "Contact"
-USER = "User"
 
 # NOTE: Detection reads at most this much of each PDF. Larger files are still attached, they
 #       are just not read, so a huge scan cannot tie up a web worker.
@@ -82,7 +82,9 @@ def SuggestTarget(
 		return empty
 
 	from erp.accounting.doctype.purchase_invoice.from_email import ReadInvoiceDetails
-	from erp.accounting.doctype.purchase_order.po_number_detect import SuggestPurchaseOrder
+	from erp.accounting.doctype.purchase_order.po_number_detect import (
+		SuggestPurchaseOrder,
+	)
 
 	sources = BuildEmailTextSources(subject, body_html, filing._ParseAttachments(attachments))
 	suggestion = SuggestPurchaseOrder(sources)
@@ -107,7 +109,7 @@ def GetSenderSupplier(sender_email: str = "") -> dict:
 
 	from erp.procurement.doctype.supplier_quote.from_email import SupplierFromContact
 
-	contactName = FindSenderContact(sender_email)
+	contactName = people.FindContactForEmail(sender_email)
 	detection = SupplierFromContact(contactName)
 	if detection and not frappe.has_permission(ORGANISATION, "read", detection["organisation"]):
 		detection = None
@@ -156,7 +158,9 @@ def CreateSupplierQuoteFromEmail(
 	Args:
 		project: The job the user picked.
 		supplier: A supplier the user picked, or "" to work it out.
-		sender: {name, email, body_html, sent_date} of the email.
+		sender: {name, email, body_html, sent_date, contact} of the email. name and email are
+			the person the quote is from (the original sender of a forwarded email); contact
+			is a Contact the user picked, or "" to find or create one for that person.
 		attachmentList: The parsed attachments; PDFs among them are read for the supplier.
 
 	Returns:
@@ -172,7 +176,9 @@ def CreateSupplierQuoteFromEmail(
 		message = _("You do not have permission to create a Supplier Quote.")
 		frappe.throw(message, frappe.PermissionError)
 
-	contactName = FindSenderContact(sender["email"])
+	contactName = people.ResolveChosenContact(sender.get("contact") or "")
+	people.AssertNotColleague(contactName)
+	contactName = contactName or people.FindContactForEmail(sender["email"])
 	documents = DecodeDetectionPDFs(attachmentList)
 	detection = ResolveQuoteSupplier(supplier or None, contactName, documents)
 	if not detection:
@@ -181,9 +187,12 @@ def CreateSupplierQuoteFromEmail(
 
 	# NOTE: A quote forwarded by a colleague comes "from" them. Our own staff are never the
 	#       supplier's contact, so no contact is created for them (the supplier still comes
-	#       from a pick or the PDF), and FindSenderContact never returns theirs.
+	#       from a pick or the PDF), and FindContactForEmail never returns theirs.
+	# NOTE: _CreateContact reuses any Contact already holding the address, readable or not, so
+	#       an address held by a Contact the user may not see gets no contact at all.
 	shouldCreateContact = not contactName and frappe.has_permission(CONTACT, "create")
-	if shouldCreateContact and not IsInternalSender(sender["email"]):
+	shouldCreateContact = shouldCreateContact and not people.HasAnyContactForEmail(sender["email"])
+	if shouldCreateContact and not people.IsInternalSender(sender["email"]):
 		senderName, senderEmail, bodyHTML = sender["name"], sender["email"], sender["body_html"]
 		newContact = filing._CreateContact(CONTACT, senderName, senderEmail, bodyHTML)
 		contactName = newContact[1]
@@ -221,13 +230,15 @@ def EnterSupplierInvoice(
 	comment: str = "",
 	attachments: str = "[]",
 	message_id: str = "",
+	contact: str = "",
 ) -> dict:
 	"""Raise a Draft Purchase Invoice against a PO from a supplier's invoice email.
 
 	The invoice carries the order's not-yet-invoiced lines; the chosen attachments are attached
 	to it (the first PDF also fills its Invoice attachment field) and the email is filed on its
 	timeline. A second click on the same email returns the invoice already raised instead of
-	making another.
+	making another. A Contact the user picked becomes the invoice's supplier contact, and
+	the email also shows on that Contact's timeline.
 
 	Returns:
 		{success, message, record_url, files} like FileEmailToRecord.
@@ -239,7 +250,9 @@ def EnterSupplierInvoice(
 	email = {
 		"subject": subject, "sender": sender, "recipients": recipients,
 		"sent_date": sent_date, "body_html": body_html,
+		"contact": people.ResolveChosenContact(contact),
 	}
+	people.AssertNotColleague(email["contact"])
 	shouldSaveEmail = bool(int(save_email or 0))
 	invoiceFields = (purchase_order, supplier_invoice_number, invoice_date, due_date)
 
@@ -264,8 +277,12 @@ def RecordSupplierInvoice(
 	attachmentList: list[dict],
 ) -> dict:
 	"""Create the invoice, attach the files and file the email. Commits on success."""
-	from erp.accounting.doctype.purchase_invoice.from_email import CreateDraftInvoiceFromOrder
-	from erp.accounting.doctype.purchase_invoice.purchase_invoice import ROW_TYPE_LINE_ITEM
+	from erp.accounting.doctype.purchase_invoice.from_email import (
+		CreateDraftInvoiceFromOrder,
+	)
+	from erp.accounting.doctype.purchase_invoice.purchase_invoice import (
+		ROW_TYPE_LINE_ITEM,
+	)
 
 	invoice = CreateDraftInvoiceFromOrder(*invoiceFields)
 	# NOTE: Files and the email are added with ignore_permissions, so the user must be allowed to
@@ -275,15 +292,18 @@ def RecordSupplierInvoice(
 		frappe.throw(message, frappe.PermissionError)
 	createdFiles = filing._AttachFiles(attachmentList, PURCHASE_INVOICE, invoice.name)
 	SetInvoiceAttachment(invoice.name, createdFiles)
+	if email["contact"]:
+		frappe.db.set_value(PURCHASE_INVOICE, invoice.name, "supplier_contact", email["contact"])
 
 	if shouldSaveEmail:
 		emailBody = email["body_html"]
 		if comment:
 			emailBody = filing._PrependNote(emailBody, comment)
-		filing._CreateCommunication(
+		communicationName = filing._CreateCommunication(
 			PURCHASE_INVOICE, invoice.name, email["subject"], email["sender"], email["recipients"],
 			email["sent_date"], filing._AppendAttachmentLinks(emailBody, createdFiles),
 		)
+		people.LinkEmailToContact(communicationName, email["contact"])
 	elif comment:
 		filing._AddComment(PURCHASE_INVOICE, invoice.name, comment)
 
@@ -361,38 +381,6 @@ def DecodeAttachment(item: dict) -> bytes:
 		return base64.b64decode(encoded, validate=False)
 	except (ValueError, TypeError):
 		return b""
-
-
-
-def FindSenderContact(senderEmail: str) -> Optional[str]:
-	"""The existing Contact holding the sender's email address, if the user may read it."""
-	emailAddress = (senderEmail or "").strip().lower()
-	if not emailAddress:
-		return None
-
-	if IsInternalSender(emailAddress):
-		return None
-
-	contactName = frappe.db.get_value("Contact Email", {"email_id": emailAddress}, "parent")
-	if not contactName or not frappe.has_permission(CONTACT, "read", contactName):
-		return None
-	return contactName
-
-
-
-def IsInternalSender(senderEmail: str) -> bool:
-	"""True when the address belongs to one of our own ERP users (a colleague, not a supplier).
-
-	Paul, 2026-11-07: procurement often forwards a supplier's quote internally, so the
-	email's sender is then a colleague. Treating them as the supplier contact would file the
-	quote under the wrong person and could write the supplier onto a staff contact.
-	"""
-	emailAddress = (senderEmail or "").strip().lower()
-	if not emailAddress:
-		return False
-	if frappe.db.exists(USER, emailAddress):
-		return True
-	return bool(frappe.db.exists(USER, {"email": emailAddress}))
 
 
 
