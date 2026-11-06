@@ -1,0 +1,139 @@
+{
+ "actions": [],
+ "creation": "2026-11-06 09:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "title",
+  "action",
+  "mode",
+  "status",
+  "user_principal_name",
+  "entra_user_id",
+  "target_id",
+  "target_name",
+  "reference_doctype",
+  "reference_name",
+  "performed_by",
+  "detail"
+ ],
+ "fields": [
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Title",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "action",
+   "fieldtype": "Select",
+   "label": "Action",
+   "options": "Create Account\nAssign Licence\nAdd Group\nRemove Group\nDisable Account\nRelease Licence\nLookup\nSend Welcome Email",
+   "read_only": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "mode",
+   "fieldtype": "Select",
+   "label": "Mode",
+   "options": "Simulation\nLive",
+   "read_only": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Success\nFailed\nSkipped",
+   "read_only": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "user_principal_name",
+   "fieldtype": "Data",
+   "label": "Sign-in Address",
+   "read_only": 1,
+   "in_standard_filter": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "entra_user_id",
+   "fieldtype": "Data",
+   "label": "Microsoft User ID",
+   "read_only": 1,
+   "hidden": 1
+  },
+  {
+   "fieldname": "target_id",
+   "fieldtype": "Data",
+   "label": "Target ID",
+   "read_only": 1,
+   "hidden": 1,
+   "description": "Group or licence ID the action applied to, used to undo exactly what the ERP did."
+  },
+  {
+   "fieldname": "target_name",
+   "fieldtype": "Data",
+   "label": "Group / Licence",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reference_doctype",
+   "fieldtype": "Link",
+   "label": "Reference Type",
+   "options": "DocType",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reference_name",
+   "fieldtype": "Dynamic Link",
+   "label": "Reference",
+   "options": "reference_doctype",
+   "read_only": 1
+  },
+  {
+   "fieldname": "performed_by",
+   "fieldtype": "Link",
+   "label": "Performed By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "detail",
+   "fieldtype": "Small Text",
+   "label": "Detail",
+   "read_only": 1,
+   "description": "What happened. Never holds passwords or tokens."
+  }
+ ],
+ "links": [],
+ "modified": "2026-11-06 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "M365Email",
+ "name": "M365 Provisioning Log",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "role": "System Manager"
+  },
+  {
+   "read": 1,
+   "report": 1,
+   "role": "HR Manager"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "autoname": "hash",
+ "title_field": "title",
+ "show_title_field_in_link": 1,
+ "search_fields": "title,user_principal_name"
+}

@@ -302,6 +302,38 @@ scheduler_events = {
 }
 ```
 
+## Entra account provisioning
+
+Creates a Microsoft 365 (Entra) account, gives it a licence and adds it to groups, and the
+reverse for leavers. The engine is `m365email/m365email/entra.py`; it knows nothing about HR
+(the hr app's Employee and Offboarding buttons call it).
+
+- **Separate credentials.** It has its own settings, **M365 Provisioning Settings**, and its own
+  Entra app registration. It does not use the mail integration's service principal.
+- **Three modes.** *Off* refuses everything. *Simulation* (the default) makes no call to
+  Microsoft: it pretends the address is free and there are 5 spare licences, and logs every step
+  as Simulation. *Live* makes real Graph calls. The staging refresh forces Simulation.
+- **Profiles.** An **M365 Provisioning Profile** is a licence plus a list of groups. HR picks the
+  default from the employee's **Employment Category** (its *M365 Account Profile* field; blank
+  means no account). The old Match Key field is no longer used by HR.
+- **Welcome email.** After a successful *Live* create, `welcome.py` emails the temporary password
+  to the employee's personal address from the Support mailbox (`welcome_sender`, default
+  support@sgcaustralia.com.au) with one Graph `sendMail` call, using the existing mail service
+  principal (`welcome_mail_service_principal`, needs Mail.Send; the provisioning registration has
+  none). It sets `saveToSentItems` false, never uses frappe.sendmail / Email Queue /
+  Communication (they would store the body) and never logs the body. The outcome is a
+  *Send Welcome Email* log row (recipient domain or reason only). If it is not sent (no personal
+  email, failure) the HR user is shown the password once instead. Simulation sends nothing.
+- **Log.** Every step is a **M365 Provisioning Log** row. It never holds a password or token. It
+  is also how the engine knows what the ERP added, so it can resume a half-finished run and undo
+  only its own groups and licences.
+- **Safety.** A free licence seat is checked before anything is created. A failure stops the run
+  and lists the steps that worked; nothing is deleted automatically. The temporary password is
+  generated on the server, returned once to the caller and never stored or logged.
+- **Graph permissions needed for Live:** User.Create, User.Read.All, User.EnableDisableAccount.All,
+  LicenseAssignment.Read.All, LicenseAssignment.ReadWrite.All, Group.Read.All, GroupMember.ReadWrite.All.
+- **Tests:** `cd sites && ../env/bin/python -m unittest m365email.m365email.test_entra m365email.m365email.test_welcome`
+
 ## 🚀 Installation
 
 See [README_SETUP.md](README_SETUP.md) for detailed setup instructions.
