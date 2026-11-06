@@ -6,7 +6,7 @@
 	<title>Send to ERP</title>
 	<script src="https://appsforoffice.microsoft.com/lib/1.1/hosted/office.js"></script>
 	<script src="msal-browser.min.js"></script>
-	<link rel="stylesheet" href="taskpane.css?v=10" />
+	<link rel="stylesheet" href="taskpane.css?v=12" />
 </head>
 <body>
 	<main id="app">
@@ -46,6 +46,22 @@
 				<button type="button" id="createNew" class="link hidden"></button>
 				<p id="chosen" class="chosen hidden"></p>
 				<p id="suggestion" class="muted hidden" role="status"></p>
+
+				<!-- The person this email is about: a forwarded email's original sender, editable -->
+				<div id="personFields" class="hidden">
+					<label for="contactSearch">Contact</label>
+					<p id="personHint" class="muted hint"></p>
+					<p id="contactChosen" class="chosen hidden"></p>
+					<input id="contactSearch" type="text" placeholder="Search contacts to change…" autocomplete="off" />
+					<ul id="contactResults" class="results"></ul>
+				</div>
+				<div id="personEdit" class="hidden">
+					<p id="personEditHint" class="muted hint"></p>
+					<label for="personName">Name</label>
+					<input id="personName" type="text" autocomplete="off" />
+					<label for="personEmail">Email</label>
+					<input id="personEmail" type="email" autocomplete="off" />
+				</div>
 
 				<!-- Create new Supplier Quote: the job, and the supplier when it is not known -->
 				<div id="quoteFields" class="hidden">
@@ -87,6 +103,6 @@
 		</section>
 	</main>
 
-	<script src="taskpane.js?v=10"></script>
+	<script src="taskpane.js?v=12"></script>
 </body>
 </html>
