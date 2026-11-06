@@ -174,3 +174,42 @@ class TestParseAttachments(unittest.TestCase):
 	def test_line_breaks_in_base64_are_accepted(self) -> None:
 		payload = '[{"file_name": "a.txt", "content_base64": "YQ==\\r\\n"}]'
 		self.assertEqual(len(send_to_erp._ParseAttachments(payload)), 1)
+
+
+
+class TestInternalSender(unittest.TestCase):
+	def setUp(self) -> None:
+		from m365email.m365email import send_to_erp_procurement
+
+		self.procurement = send_to_erp_procurement
+		frappeDB = send_to_erp_procurement.frappe.db
+		existsPatch = patch.object(frappeDB, "exists", side_effect=self.fakeExists)
+		existsPatch.start()
+		self.addCleanup(existsPatch.stop)
+
+
+	def fakeExists(self, doctype: str, filters: object) -> bool:
+		staff = {"angela.obrien@sgcaustralia.com.au"}
+		if isinstance(filters, dict):
+			return filters.get("email") in staff
+		return filters in staff
+
+
+	def test_colleague_is_internal(self) -> None:
+		self.assertTrue(self.procurement.IsInternalSender(" Angela.OBrien@sgcaustralia.com.au "))
+
+
+	def test_supplier_is_not_internal(self) -> None:
+		self.assertFalse(self.procurement.IsInternalSender("sales@miw.net.au"))
+
+
+	def test_colleague_never_yields_a_contact(self) -> None:
+		self.assertIsNone(self.procurement.FindSenderContact("angela.obrien@sgcaustralia.com.au"))
+
+
+	def test_match_on_user_email_field(self) -> None:
+		self.assertTrue(self.procurement.IsInternalSender("ANGELA.OBRIEN@sgcaustralia.com.au"))
+
+
+	def test_empty_sender_is_not_internal(self) -> None:
+		self.assertFalse(self.procurement.IsInternalSender(""))
