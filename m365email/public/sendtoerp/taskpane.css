@@ -25,7 +25,7 @@ label { display: block; margin: 10px 0 4px; font-weight: 600; }
 
 label.check { font-weight: 400; display: flex; align-items: center; gap: 6px; }
 
-input[type="text"], input[type="email"], input[type="password"], select, textarea {
+input[type="text"], input[type="email"], input[type="password"], input[type="date"], select, textarea {
 	width: 100%;
 	padding: 7px 8px;
 	border: 1px solid var(--border);
@@ -103,3 +103,5 @@ legend { font-weight: 600; padding: 0 4px; }
 .env--prod { background: #ecfdf5; color: var(--ok); }
 .env--staging { background: #fef3c7; color: #92400e; }
 .env--unknown { background: #f3f4f6; color: var(--muted); }
+.hint { font-size: 12px; margin: 2px 0 4px; }
+.results li.result-heading { color: var(--muted); font-size: 12px; cursor: default; background: transparent; }

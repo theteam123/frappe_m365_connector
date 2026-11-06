@@ -64,6 +64,8 @@ pipeline for both incoming sync and outgoing send.
 | Filing API | `send_to_erp.py` — a Task/To-Do target files the email FIRST, then creates the ToDo with `reference_type = Communication` so the "ToDo Assigned" Notification (tg_custom fixture) can quote the source email |
 | Create support ticket | `send_to_erp.py::FileEmailAsTicket` — the picked "record" is the ticket type; goes through the support app's `CreateTicket`, so a proxy-mode site (staging) creates the ticket ON PRODUCTION. Email text is copied into the description; attachments are added only for users with write on Support Ticket (the helpdesk's own rule) |
 | Create new Contact / Candidate | `CreateRecordFromSender` — reuses a record already holding the sender's email; `FileEmailToRecord` then requires write on it, reused or new |
+| Procurement (Paul, 2026-11-06) | `send_to_erp_procurement.py` — "Create new" Supplier Quote (job picker; supplier from picked > sender's Contact company > quote PDF), PO suggestion (`SuggestTarget`: PO number from subject > body > PDFs) and `EnterSupplierInvoice` (draft Purchase Invoice with the PO's not-yet-invoiced lines). Business rules live in erp (`po_number_detect.py`, `purchase_invoice/from_email.py`, `supplier_quote/from_email.py`); this module is imported only where erp is installed |
+| Double-create guard | `send_to_erp.RunOncePerEmail` — a "create" runs once per email (file lock + cache keyed on a hash of action + Internet message id), shared across users; a repeat returns the earlier record, named only to someone who may read it |
 | Sign-in | `addin_sso.py` (auth hook: Microsoft JWT or `sterp_` session token) + `addin_session.py` (mint / validate / revoke remembered sessions) |
 | User guide | `docs/send-to-erp-guide.html` |
 

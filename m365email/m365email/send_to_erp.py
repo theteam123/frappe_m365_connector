@@ -9,8 +9,11 @@ inserted with ignore_permissions, so a user can only file against records they
 are allowed to see and attach to.
 """
 import base64
+import binascii
+import hashlib
 import json
-from typing import Optional
+import re
+from typing import Callable, Optional
 
 import frappe
 from frappe import _
@@ -19,13 +22,15 @@ from frappe import _
 # Doctypes a user may file an email against, in picker order. Each user only
 # sees the subset they have read access to (see GetPickableDoctypes).
 # NOTE: Candidate and Employee added for recruitment (Paul, 2026-10-23); sites without hr skip
-# them, because GetPickableDoctypes drops doctypes that do not exist.
+# them, because GetPickableDoctypes drops doctypes that do not exist. Supplier Quote added for
+# procurement (Paul, 2026-11-06); it exists only where the erp app is installed.
 DEFAULT_PICKABLE_DOCTYPES = [
 	"Contact",
 	"Candidate",
 	"Employee",
 	"Project",
 	"Purchase Order",
+	"Supplier Quote",
 	"Supplier",
 	"Sales Invoice",
 	"Purchase Invoice",
@@ -33,6 +38,8 @@ DEFAULT_PICKABLE_DOCTYPES = [
 
 MAX_SEARCH_RESULTS = 20
 MAX_ATTACHMENT_BYTES = 35 * 1024 * 1024  # 35 MB — above Outlook's own attach limit
+MAX_TOTAL_ATTACHMENT_BYTES = 100 * 1024 * 1024  # all attachments of one filing together
+BASE64_TEXT = re.compile(r"[A-Za-z0-9+/]*={0,2}")  # matched after line breaks are removed
 CONTACT_EXTRACTION_MAX_CHARS = 8000  # email body chars sent to AI (covers most signatures)
 CONTACT_EXTRACTION_MAX_TOKENS = 400  # AI response cap for contact-field extraction
 
@@ -63,6 +70,20 @@ TICKET_UPLOAD_METHOD = "support.support.page.helpdesk.data.ticket.UploadTicketAt
 
 # Targets that are not existing records to search, but something new to create.
 PSEUDO_TARGETS = (TASK_TARGET, TICKET_TARGET)
+
+# "Create new" on a Supplier Quote raises a quote from the email (send_to_erp_procurement).
+SUPPLIER_QUOTE_TARGET = "Supplier Quote"
+
+# Procurement records show their supplier's name beneath their number in the picker. The
+# supplier field is a Link to Organisation, whose id is an opaque key, so the name is looked up.
+SUPPLIER_SUBLABEL_DOCTYPES = ("Purchase Order", "Supplier Quote", "Purchase Invoice")
+
+# A "create" action from one email runs once: a second click, or a colleague opening the same
+# email in a shared mailbox, gets the record already made instead of a duplicate. The record is
+# remembered for this long, and a click waits this long for one still being created.
+CREATE_GUARD_SECONDS = 30 * 60
+CREATE_GUARD_LOCK_TIMEOUT_SECONDS = 60
+CREATE_GUARD_PREFIX = "sendtoerp-create"
 
 
 
@@ -151,6 +172,8 @@ def SearchTargets(target_doctype: Optional[str] = None, txt: str = "") -> list[d
 	secondaryField = _GetSecondaryField(doctype)
 	if secondaryField and secondaryField not in fields:
 		fields.append(secondaryField)
+	if doctype in SUPPLIER_SUBLABEL_DOCTYPES:
+		fields.append("supplier")
 
 	searchText = (txt or "").strip()
 	orFilters = {}
@@ -167,7 +190,10 @@ def SearchTargets(target_doctype: Optional[str] = None, txt: str = "") -> list[d
 		order_by="modified desc",
 	)
 
-	return [_FormatSearchRow(row, titleField, secondaryField) for row in records]
+	results = [_FormatSearchRow(row, titleField, secondaryField) for row in records]
+	if doctype in SUPPLIER_SUBLABEL_DOCTYPES:
+		AddSupplierSublabels(doctype, records, results)
+	return results
 
 
 
@@ -186,6 +212,9 @@ def FileEmailToRecord(
 	new_name: str = "",
 	new_email: str = "",
 	attachments: str = "[]",
+	project: str = "",
+	supplier: str = "",
+	message_id: str = "",
 ) -> dict:
 	"""File an email and/or its attachments against a record or a new task.
 
@@ -208,11 +237,26 @@ def FileEmailToRecord(
 		new_name: Sender's display name for the new record when create_new is set.
 		new_email: Sender's email address for the new record when create_new is set.
 		attachments: JSON list of {file_name, content_base64, content_type}.
+		project: For "create new" Supplier Quote, the job the quote is for.
+		supplier: For "create new" Supplier Quote, a supplier the user picked (optional:
+			otherwise it is taken from the sender's contact, then the quote PDF).
+		message_id: The email's Internet message id. With it, a "create new" runs once per
+			email: repeating it returns the record already created.
 
 	Returns:
-		{success, communication, files, message} describing what was created.
+		{success, communication, files, message, record, record_url} describing what was
+		created or filed to.
 	"""
 	_GuardPickableDoctype(target_doctype)
+
+	if int(create_new or 0) and message_id:
+		def createOnce() -> dict:
+			return FileEmailToRecord(
+				target_doctype, target_name, subject, sender, recipients, sent_date, body_html,
+				save_email, comment, create_new, new_name, new_email, attachments, project, supplier,
+			)
+		# NOTE: The job is part of the key, so a quote for a second job is not mistaken for a repeat.
+		return RunOncePerEmail(f"create-{target_doctype}-{project}", message_id, createOnce)
 
 	shouldSaveEmail = bool(int(save_email or 0))
 	attachmentList = _ParseAttachments(attachments)
@@ -235,14 +279,25 @@ def FileEmailToRecord(
 		)
 
 	communicationName = None
+	creationNote = ""
 	if isTask:
 		recordDoctype, recordName, communicationName = CreateTaskFromEmail(
 			target_name, commentText, emailFields, shouldSaveEmail,
 		)
 	elif shouldCreateNew:
-		recordDoctype, recordName = CreateRecordFromSender(
-			target_doctype, new_name, new_email, body_html,
-		)
+		if target_doctype == SUPPLIER_QUOTE_TARGET:
+			from m365email.m365email.send_to_erp_procurement import CreateSupplierQuoteFromEmail
+
+			sender = {
+				"name": new_name, "email": new_email, "body_html": body_html, "sent_date": sent_date,
+			}
+			recordDoctype, recordName, creationNote = CreateSupplierQuoteFromEmail(
+				project, supplier, sender, attachmentList,
+			)
+		else:
+			recordDoctype, recordName = CreateRecordFromSender(
+				target_doctype, new_name, new_email, body_html,
+			)
 		# "Create new" may reuse a record already holding the sender's email, and
 		# filing then writes to it, so apply the same write check as a picked record.
 		# The message names no record: the user may not be allowed to read it.
@@ -291,12 +346,113 @@ def FileEmailToRecord(
 
 	# For a task, name the assignee in the message (not the new ToDo's id).
 	summaryName = target_name if isTask else _ResolveRecordLabel(recordDoctype, recordName)
+	hasComment = bool(commentText)
+	summaryParts = (isTask, shouldSaveEmail, createdFiles, recordDoctype, summaryName, hasComment)
+	summary = _BuildSummary(*summaryParts)
+	if creationNote:
+		created = _("Created {0} {1}.").format(_(recordDoctype), summaryName)
+		summary = " ".join((created, creationNote, summary))
 	return {
 		"success": True,
 		"communication": communicationName,
 		"files": createdFiles,
-		"message": _BuildSummary(isTask, shouldSaveEmail, createdFiles, recordDoctype, summaryName, bool(commentText)),
+		"record": {"doctype": recordDoctype, "name": recordName},
+		"record_url": frappe.utils.get_url_to_form(recordDoctype, recordName),
+		"message": summary,
 	}
+
+
+
+def RunOncePerEmail(action: str, messageID: str, createRecord: Callable[[], dict]) -> dict:
+	"""Run a "create" action at most once per email, returning the earlier record on a repeat.
+
+	A filesystem lock serialises two clicks arriving together; the record made is remembered
+	in the cache, keyed by the action and a hash of the email's message id (never the raw id).
+	The guard is shared by everyone, so a colleague opening the same email in a shared mailbox
+	is not able to create a duplicate either; they are only told the record's name when they
+	may read it.
+
+	Args:
+		action: What is being created, e.g. "create-Supplier Quote".
+		messageID: The email's Internet message id; without one there is nothing to key on
+			and the action simply runs.
+		createRecord: Creates the record, commits, and returns the endpoint's result, which
+			carries {"record": {doctype, name}}.
+
+	Returns:
+		The new result, or an "already created" result naming the earlier record.
+	"""
+	from frappe.utils.synchronization import filelock
+
+	if not messageID:
+		return createRecord()
+
+	guardKey = BuildCreateGuardKey(action, messageID)
+	with filelock(guardKey, timeout=CREATE_GUARD_LOCK_TIMEOUT_SECONDS):
+		earlier = frappe.cache.get_value(guardKey)
+		if earlier and frappe.db.exists(earlier.get("doctype"), earlier.get("name")):
+			return BuildAlreadyCreatedResult(earlier)
+
+		result = createRecord()
+		record = result.get("record") or {}
+		if record.get("doctype") and record.get("name"):
+			frappe.cache.set_value(guardKey, record, expires_in_sec=CREATE_GUARD_SECONDS)
+		return result
+
+
+
+def BuildCreateGuardKey(action: str, messageID: str) -> str:
+	"""A filesystem- and cache-safe key: the action and the message id, hashed together."""
+	digest = hashlib.sha256(f"{action}\n{messageID}".encode("utf-8")).hexdigest()
+	return f"{CREATE_GUARD_PREFIX}-{digest}"
+
+
+
+def BuildAlreadyCreatedResult(record: dict) -> dict:
+	"""The reply to a repeated "create": name the earlier record only to someone who may read it."""
+	doctype, name = record["doctype"], record["name"]
+	if not frappe.has_permission(doctype, "read", name):
+		message = _("A {0} has already been created from this email.").format(_(doctype))
+		return {
+			"success": True,
+			"communication": None,
+			"files": [],
+			"message": message,
+			"already_created": True,
+		}
+
+	message = _("{0} {1} was already created from this email, so nothing new was made.")
+	return {
+		"success": True,
+		"communication": None,
+		"files": [],
+		"record": record,
+		"record_url": frappe.utils.get_url_to_form(doctype, name),
+		"message": message.format(_(doctype), _ResolveRecordLabel(doctype, name)),
+		"already_created": True,
+	}
+
+
+
+def AddSupplierSublabels(doctype: str, records: list[dict], results: list[dict]) -> None:
+	"""Show each procurement record's supplier name beneath its number in the picker."""
+	suppliers = {row.get("supplier") for row in records if row.get("supplier")}
+	if not suppliers:
+		return
+	# NOTE: A user who may not read suppliers still gets their search results, just unlabelled.
+	if not frappe.has_permission("Organisation", "read"):
+		return
+
+	names = dict(frappe.get_list(
+		"Organisation",
+		filters={"name": ["in", list(suppliers)]},
+		fields=["name", "organisation_name"],
+		as_list=True,
+	))
+	for row, result in zip(records, results):
+		supplierName = names.get(row.get("supplier"))
+		if supplierName:
+			result["sublabel"] = supplierName
 
 
 
@@ -404,12 +560,25 @@ def _ParseAttachments(attachments: str) -> list[dict]:
 	if not isinstance(parsed, list):
 		frappe.throw(_("Attachment payload was not valid."))
 
+	totalBytes = 0
 	for item in parsed:
-		content = item.get("content_base64") or ""
+		if not isinstance(item, dict):
+			frappe.throw(_("Attachment payload was not valid."))
+		content = item.get("content_base64", "")
+		# NOTE: Checked here so a malformed attachment is a clear message, never a server error.
+		# A length that is not a multiple of 4 cannot be base64 the browser produced.
+		if not isinstance(content, str):
+			frappe.throw(_("Attachment {0} could not be read.").format(item.get("file_name", "")))
+		compact = content.replace("\r", "").replace("\n", "")
+		if len(compact) % 4 or not BASE64_TEXT.fullmatch(compact):
+			frappe.throw(_("Attachment {0} could not be read.").format(item.get("file_name", "")))
 		# base64 expands ~4/3; estimate decoded size without decoding twice.
 		estimatedBytes = (len(content) * 3) // 4
 		if estimatedBytes > MAX_ATTACHMENT_BYTES:
 			frappe.throw(_("Attachment {0} is too large.").format(item.get("file_name", "")))
+		totalBytes += estimatedBytes
+		if totalBytes > MAX_TOTAL_ATTACHMENT_BYTES:
+			frappe.throw(_("The attachments are too large to file together. File fewer at once."))
 
 	return parsed
 
@@ -525,13 +694,18 @@ def _AttachFiles(attachmentList: list[dict], parentDoctype: str, parentName: str
 		if not content:
 			continue
 
+		try:
+			decoded = base64.b64decode(content)
+		except (binascii.Error, ValueError):
+			frappe.throw(_("Attachment {0} could not be read.").format(fileName))
+
 		fileDoc = frappe.get_doc({
 			"doctype": "File",
 			"file_name": fileName,
 			"attached_to_doctype": parentDoctype,
 			"attached_to_name": parentName,
 			"is_private": 1,
-			"content": base64.b64decode(content),
+			"content": decoded,
 		})
 		fileDoc.insert(ignore_permissions=True)
 		created.append({"file_name": fileDoc.file_name, "file_url": fileDoc.file_url})
