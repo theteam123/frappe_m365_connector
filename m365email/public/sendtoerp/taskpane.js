@@ -18,22 +18,33 @@
 
 const API_BASE = "/api/method/m365email.m365email.send_to_erp.";
 const SESSION_API_BASE = "/api/method/m365email.m365email.addin_session.";
-const SESSION_STORAGE_KEY = "sendtoerp.session";   // {token, user, expires_on} in localStorage
-const AUTH_FAILURE_STATUSES = [401, 403];         // ERP rejected the bearer token
+const PROCUREMENT_API_BASE = "/api/method/m365email.m365email.send_to_erp_procurement.";
+const SESSION_STORAGE_KEY = "sendtoerp.session"; // {token, user, expires_on} in localStorage
+const AUTH_FAILURE_STATUSES = [401, 403]; // ERP rejected the bearer token
 const SEARCH_DEBOUNCE_MS = 250;
 const MIN_SEARCH_CHARS = 1;
-const TASK_TYPE = "ToDo";      // the "Task / To-Do" target searches people, not records
-const TICKET_TYPE = "Support Ticket";  // the "Create support ticket" target lists ticket types
+const TASK_TYPE = "ToDo"; // the "Task / To-Do" target searches people, not records
+const TICKET_TYPE = "Support Ticket"; // the "Create support ticket" target lists ticket types
+const QUOTE_TYPE = "Supplier Quote"; // "create new" raises a quote for a job (Paul, 2026-11-06)
+const ORDER_TYPE = "Purchase Order"; // the PO is suggested from the email; can enter an invoice
 // Targets that offer "create new" from the email's sender, with the word used in the panel.
-const CREATABLE_TYPES = { "Contact": "contact", "Candidate": "candidate" };
+const CREATABLE_TYPES = {
+	Contact: "contact",
+	Candidate: "candidate",
+	[QUOTE_TYPE]: "supplier quote",
+};
+const PROJECT_TYPE = "Project"; // a new Supplier Quote's job is picked from Projects
+const DATE_PART_WIDTH = 2; // month and day in YYYY-MM-DD
+const PDF_NAME_PATTERN = /\.pdf$/i;
+const INVOICE_WORD_PATTERN = /invoice/i;
 
 // Microsoft 365 sign-in (Nested App Authentication). These are public OAuth
 // identifiers for the existing m365email Azure app — not secrets.
 const MSAL_CLIENT_ID = "d2a895aa-c239-4605-ac8e-d844341887fc";
 const MSAL_TENANT_ID = "85e4e8f4-774e-4a96-987f-bc1a3813d984";
 const MSAL_SCOPES = ["User.Read"];
-const TOKEN_REFRESH_SKEW_MS = 120000;          // re-acquire a token this long before it expires
-const SIGNIN_DIALOG_SIZE = { height: 65, width: 40 };  // % of screen, for the web sign-in dialog
+const TOKEN_REFRESH_SKEW_MS = 120000; // re-acquire a token this long before it expires
+const SIGNIN_DIALOG_SIZE = { height: 65, width: 40 }; // % of screen, for the web sign-in dialog
 
 // Environment badge. The panel is served same-origin with its ERP site, so the
 // host reliably identifies whether the user is filing to Production or Staging.
@@ -43,14 +54,16 @@ const ENV_LABELS = [
 ];
 
 const state = {
-	msToken: null,     // Microsoft 365 ID token (identity sent to ERP at sign-in)
-	erpSession: null,  // {token, user, expires_on} — ERP's remembered sign-in, reused between opens
-	attachments: [],   // {id, name, selected}
-	target: null,      // {doctype, value, label, create}
-	senderName: "",    // open email's sender display name (for "create new contact")
-	senderEmail: "",   // open email's sender address
+	msToken: null, // Microsoft 365 ID token (identity sent to ERP at sign-in)
+	erpSession: null, // {token, user, expires_on} — ERP's remembered sign-in, reused between opens
+	attachments: [], // {id, name, selected}
+	target: null, // {doctype, value, label, create}
+	project: null, // {value, label} — the job for a new Supplier Quote
+	supplier: null, // {value, label} — the supplier for a new Supplier Quote, when picked or known
+	suggestionRun: 0, // increments per PO suggestion, so a stale reply is ignored
+	senderName: "", // open email's sender display name (for "create new contact")
+	senderEmail: "", // open email's sender address
 };
-
 
 // Microsoft 365 sign-on. On desktop Outlook the Office host brokers a token
 // silently via Nested App Authentication (NAA). In Outlook on the web the add-in
@@ -125,15 +138,16 @@ const auth = {
 					return;
 				}
 				const dialog = openResult.value;
-				dialog.addEventHandler(Office.EventType.DialogMessageReceived,
-					(arg) => handleDialogToken(arg, dialog, resolve, reject));
-				dialog.addEventHandler(Office.EventType.DialogEventReceived,
-					() => reject(new Error("Sign-in was cancelled.")));
+				dialog.addEventHandler(Office.EventType.DialogMessageReceived, (arg) =>
+					handleDialogToken(arg, dialog, resolve, reject)
+				);
+				dialog.addEventHandler(Office.EventType.DialogEventReceived, () =>
+					reject(new Error("Sign-in was cancelled."))
+				);
 			});
 		});
 	},
 };
-
 
 // True if the JWT is missing, unreadable, or within the refresh skew of expiry.
 function isTokenExpired(token) {
@@ -141,12 +155,11 @@ function isTokenExpired(token) {
 		let base64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
 		while (base64.length % 4) base64 += "=";
 		const claims = JSON.parse(atob(base64));
-		return Date.now() >= (claims.exp * 1000) - TOKEN_REFRESH_SKEW_MS;
+		return Date.now() >= claims.exp * 1000 - TOKEN_REFRESH_SKEW_MS;
 	} catch (e) {
 		return true;
 	}
 }
-
 
 // Handle the message posted back by the sign-in dialog: resolve with the ID
 // token, or reject with the reported error.
@@ -154,7 +167,9 @@ function handleDialogToken(arg, dialog, resolve, reject) {
 	let payload = {};
 	try {
 		payload = JSON.parse(arg.message);
-	} catch (e) { /* leave payload empty -> treated as failure */ }
+	} catch (e) {
+		/* leave payload empty -> treated as failure */
+	}
 	dialog.close();
 	if (payload.status === "ok" && payload.idToken) {
 		state.msToken = payload.idToken;
@@ -164,14 +179,13 @@ function handleDialogToken(arg, dialog, resolve, reject) {
 	}
 }
 
-
-// Methods live under send_to_erp unless given as "session:<Method>".
+// Methods live under send_to_erp unless given as "session:<Method>" or "procurement:<Method>".
 function apiUrl(method) {
-	const SESSION_PREFIX = "session:";
-	if (!method.startsWith(SESSION_PREFIX)) return API_BASE + method;
-	return SESSION_API_BASE + method.slice(SESSION_PREFIX.length);
+	const prefixes = { "session:": SESSION_API_BASE, "procurement:": PROCUREMENT_API_BASE };
+	const prefix = Object.keys(prefixes).find((candidate) => method.startsWith(candidate));
+	if (!prefix) return API_BASE + method;
+	return prefixes[prefix] + method.slice(prefix.length);
 }
-
 
 // A rejected bearer while using a remembered session means ERP no longer
 // accepts it (expired, revoked, or user disabled): forget it so the next open
@@ -182,11 +196,10 @@ function noteAuthFailure(resp) {
 	state.erpSession = null;
 }
 
-
 async function apiGet(method, params) {
 	const token = await auth.ensureToken();
 	const qs = params ? "?" + new URLSearchParams(params).toString() : "";
-	const headers = { "Authorization": `Bearer ${token}` };
+	const headers = { Authorization: `Bearer ${token}` };
 	const resp = await fetch(`${apiUrl(method)}${qs}`, { headers });
 	if (!resp.ok) {
 		noteAuthFailure(resp);
@@ -195,12 +208,14 @@ async function apiGet(method, params) {
 	return (await resp.json()).message;
 }
 
-
 async function apiPost(method, params) {
 	const token = await auth.ensureToken();
 	const resp = await fetch(apiUrl(method), {
 		method: "POST",
-		headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/x-www-form-urlencoded" },
+		headers: {
+			Authorization: `Bearer ${token}`,
+			"Content-Type": "application/x-www-form-urlencoded",
+		},
 		body: new URLSearchParams(params || {}),
 	});
 	if (!resp.ok) {
@@ -210,7 +225,6 @@ async function apiPost(method, params) {
 	}
 	return (await resp.json()).message;
 }
-
 
 /* ---- Remembered ERP session (survives closing and reopening the panel) ---- */
 
@@ -223,45 +237,52 @@ function loadStoredSession() {
 		if (stored.expires_on && new Date(stored.expires_on) <= new Date()) return null;
 		return stored;
 	} catch (e) {
-		return null;  // storage unavailable (private browsing etc.) — just sign in again
+		return null; // storage unavailable (private browsing etc.) — just sign in again
 	}
 }
-
 
 function saveStoredSession(session) {
 	try {
 		window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
-	} catch (e) { /* storage unavailable — the session still works for this open */ }
+	} catch (e) {
+		/* storage unavailable — the session still works for this open */
+	}
 }
-
 
 function clearStoredSession() {
 	try {
 		window.localStorage.removeItem(SESSION_STORAGE_KEY);
-	} catch (e) { /* nothing to clear */ }
+	} catch (e) {
+		/* nothing to clear */
+	}
 }
-
 
 function describePlatform() {
 	const diagnostics = (Office.context && Office.context.diagnostics) || {};
-	return [diagnostics.host, Office.context.platform, diagnostics.version].filter(Boolean).join(" ");
+	return [diagnostics.host, Office.context.platform, diagnostics.version]
+		.filter(Boolean)
+		.join(" ");
 }
-
 
 // After a Microsoft sign-in, ask ERP for a remembered session so later opens
 // skip the sign-in. Failure is not fatal: the Microsoft token still works for
 // this open, it just will not be remembered.
 async function establishErpSession() {
 	try {
-		const session = await apiPost("session:CreateAddinSession", { platform: describePlatform() });
+		const session = await apiPost("session:CreateAddinSession", {
+			platform: describePlatform(),
+		});
 		if (!session || !session.token) return;
-		state.erpSession = { token: session.token, user: session.user, expires_on: session.expires_on };
+		state.erpSession = {
+			token: session.token,
+			user: session.user,
+			expires_on: session.expires_on,
+		};
 		saveStoredSession(state.erpSession);
 	} catch (e) {
 		console.warn("Send to ERP: could not create a remembered session", e);
 	}
 }
-
 
 // Try the remembered session before asking anyone to sign in. Returns the ERP
 // user on success, or null (with the stale session forgotten) otherwise.
@@ -272,17 +293,20 @@ async function resumeStoredSession() {
 	try {
 		const session = await apiGet("GetSession");
 		if (session && session.user && session.user !== "Guest") return session.user;
-	} catch (e) { /* fall through: treat as not signed in */ }
+	} catch (e) {
+		/* fall through: treat as not signed in */
+	}
 	clearStoredSession();
 	state.erpSession = null;
 	return null;
 }
 
-
 async function signOut() {
 	try {
 		if (state.erpSession) await apiPost("session:RevokeAddinSession");
-	} catch (e) { /* revoking is best-effort; the local copy is dropped regardless */ }
+	} catch (e) {
+		/* revoking is best-effort; the local copy is dropped regardless */
+	}
 	clearStoredSession();
 	state.erpSession = null;
 	state.msToken = null;
@@ -293,41 +317,46 @@ async function signOut() {
 	show("loginBtn");
 }
 
-
 function extractError(text) {
 	try {
 		const messages = JSON.parse(JSON.parse(text)._server_messages || "[]");
 		if (messages.length) return JSON.parse(messages[0]).message;
-	} catch (e) { /* fall through */ }
+	} catch (e) {
+		/* fall through */
+	}
 	return null;
 }
 
-
-function $(id) { return document.getElementById(id); }
-function show(id) { $(id).classList.remove("hidden"); }
-function hide(id) { $(id).classList.add("hidden"); }
-
+function $(id) {
+	return document.getElementById(id);
+}
+function show(id) {
+	$(id).classList.remove("hidden");
+}
+function hide(id) {
+	$(id).classList.add("hidden");
+}
 
 function applyEnvBadges() {
 	const host = window.location.hostname;
-	const known = ENV_LABELS.find(envEntry => host.includes(envEntry.match));
+	const known = ENV_LABELS.find((envEntry) => host.includes(envEntry.match));
 	const label = known ? known.label : host;
 	const className = known ? known.className : "env--unknown";
-	document.querySelectorAll(".env").forEach(badgeElement => {
+	document.querySelectorAll(".env").forEach((badgeElement) => {
 		badgeElement.textContent = label;
 		badgeElement.classList.add(className);
 	});
 }
 
-
 /* ---- Office.js item reading ---- */
 
 function readAttachments() {
 	const item = Office.context.mailbox.item;
-	const files = (item.attachments || []).filter(a => a.attachmentType === "file" && !a.isInline);
-	state.attachments = files.map(a => ({ id: a.id, name: a.name, selected: true }));
+	const files = (item.attachments || []).filter(
+		(a) => a.attachmentType === "file" && !a.isInline
+	);
+	state.attachments = files.map((a) => ({ id: a.id, name: a.name, selected: true }));
 }
-
 
 function getEmailBodyHtml() {
 	return new Promise((resolve) => {
@@ -336,7 +365,6 @@ function getEmailBodyHtml() {
 		});
 	});
 }
-
 
 function getAttachmentContent(attachmentId) {
 	return new Promise((resolve, reject) => {
@@ -347,11 +375,10 @@ function getAttachmentContent(attachmentId) {
 	});
 }
 
-
 function emailMeta() {
 	const item = Office.context.mailbox.item;
 	const from = item.from || item.sender || {};
-	const to = (item.to || []).map(r => r.emailAddress).join(", ");
+	const to = (item.to || []).map((r) => r.emailAddress).join(", ");
 	return {
 		subject: item.subject || "",
 		sender: from.emailAddress || "",
@@ -360,13 +387,38 @@ function emailMeta() {
 	};
 }
 
+// The email's Internet message id, which ERP uses so a "create" runs once per email.
+function emailMessageId() {
+	const item = Office.context.mailbox.item;
+	return item.internetMessageId || item.itemId || "";
+}
+
+// Read the chosen attachments (or only the PDFs) as {file_name, content_base64, content_type}.
+async function readAttachmentPayload(onlyPdfs) {
+	const wanted = state.attachments.filter((attachment) =>
+		onlyPdfs ? PDF_NAME_PATTERN.test(attachment.name) : attachment.selected
+	);
+	const payload = [];
+	for (const attachment of wanted) {
+		const content = await getAttachmentContent(attachment.id);
+		payload.push({
+			file_name: attachment.name,
+			content_base64: content.content,
+			content_type: content.format,
+		});
+	}
+	return payload;
+}
 
 /* ---- UI wiring ---- */
 
 function renderAttachments() {
 	const container = $("attachmentList");
 	container.innerHTML = "";
-	if (!state.attachments.length) { show("noAttachments"); return; }
+	if (!state.attachments.length) {
+		show("noAttachments");
+		return;
+	}
 	hide("noAttachments");
 	state.attachments.forEach((a, i) => {
 		const label = document.createElement("label");
@@ -379,19 +431,17 @@ function renderAttachments() {
 	});
 }
 
-
 function escapeHtml(s) {
 	const d = document.createElement("div");
 	d.textContent = s;
 	return d.innerHTML;
 }
 
-
 async function populateDoctypes() {
 	const types = await apiGet("GetPickableDoctypes");
 	const select = $("doctype");
 	select.innerHTML = "";
-	(types || []).forEach(t => {
+	(types || []).forEach((t) => {
 		const opt = document.createElement("option");
 		opt.value = t.doctype;
 		opt.textContent = t.label;
@@ -400,16 +450,22 @@ async function populateDoctypes() {
 	updateModeForType();
 }
 
-
 // Picker wording per mode: filing to a record, assigning a task, or raising a ticket.
 const MODE_TEXT = {
 	[TASK_TYPE]: { find: "Assign to", placeholder: "Search people…", button: "Create task" },
 	[TICKET_TYPE]: {
-		find: "Ticket type", placeholder: "Filter ticket types…", button: "Create support ticket",
+		find: "Ticket type",
+		placeholder: "Filter ticket types…",
+		button: "Create support ticket",
 	},
 };
-const RECORD_MODE_TEXT = { find: "Find record", placeholder: "Start typing…", button: "Attach to ERP" };
-
+const RECORD_MODE_TEXT = {
+	find: "Find record",
+	placeholder: "Start typing…",
+	button: "Attach to ERP",
+};
+const INVOICE_BUTTON_TEXT = "Enter Supplier Invoice";
+const QUOTE_BUTTON_TEXT = "Create supplier quote";
 
 // Switch the picker between filing to a record, assigning a Task/To-Do, and
 // raising a support ticket.
@@ -422,13 +478,19 @@ function updateModeForType() {
 	$("search").value = "";
 	$("results").innerHTML = "";
 	hide("chosen");
+	hide("suggestion");
+	hide("quoteFields");
+	hide("invoiceFields");
+	hide("openRecord");
 	state.target = null;
+	state.suggestionRun += 1;
 
-	// Contact and Candidate offer creating a brand-new record from the email's sender.
+	// Contact, Candidate and Supplier Quote offer creating a brand-new record from the email.
 	const createWord = CREATABLE_TYPES[doctype];
 	if (createWord) {
 		const who = state.senderName || state.senderEmail || "this sender";
-		$("createNew").textContent = `➕ Create new ${createWord}: ${who}`;
+		const fromWhom = doctype === QUOTE_TYPE ? " from this email" : `: ${who}`;
+		$("createNew").textContent = `➕ Create new ${createWord}${fromWhom}`;
 		show("createNew");
 	} else {
 		hide("createNew");
@@ -436,9 +498,184 @@ function updateModeForType() {
 
 	// There are only a handful of ticket types, so list them straight away.
 	if (doctype === TICKET_TYPE) runSearch("");
+	// A supplier's invoice quotes our PO number: find it and preselect the order.
+	if (doctype === ORDER_TYPE) {
+		fillInvoiceDetails({}, emailMeta().subject);
+		suggestPurchaseOrder();
+	}
 	refreshFileButton();
 }
 
+/* ---- Purchase Order: suggest the order, and enter the email as a supplier invoice ---- */
+
+// Read the PO number from the subject and body; only if that finds nothing, read the PDFs
+// too (fetching attachments is the slow part). Preselect a single order, list several.
+async function suggestPurchaseOrder() {
+	const run = state.suggestionRun;
+	const meta = emailMeta();
+	setSuggestion("Looking for a PO number in the email…");
+	try {
+		const params = {
+			target_doctype: ORDER_TYPE,
+			subject: meta.subject,
+			body_html: await getEmailBodyHtml(),
+		};
+		let suggestion = await apiPost("procurement:SuggestTarget", params);
+		const hasPdf = state.attachments.some((attachment) =>
+			PDF_NAME_PATTERN.test(attachment.name)
+		);
+		if (!suggestion.match && !suggestion.choices.length && hasPdf) {
+			setSuggestion("Reading the PDF for a PO number…");
+			params.attachments = JSON.stringify(await readAttachmentPayload(true));
+			suggestion = await apiPost("procurement:SuggestTarget", params);
+		}
+		if (run !== state.suggestionRun) return; // the user switched type meanwhile
+		// Never overwrite an invoice number the user has already typed.
+		if (!$("invoiceNumber").value.trim())
+			fillInvoiceDetails(suggestion.invoice || {}, meta.subject);
+		if (state.target) return; // the user already picked an order themselves
+		applySuggestion(suggestion);
+	} catch {
+		if (run !== state.suggestionRun) return;
+		setSuggestion("Couldn't read a PO number from this email. Search for the order below.");
+	}
+}
+
+function applySuggestion(suggestion) {
+	if (suggestion.match) {
+		chooseTarget(ORDER_TYPE, suggestion.match);
+		setSuggestion(`Found purchase order ${suggestion.match.label} in the email.`);
+		return;
+	}
+	if (suggestion.choices.length) {
+		setSuggestion("This email mentions more than one purchase order. Pick the right one:");
+		renderResultRows(ORDER_TYPE, suggestion.choices);
+		return;
+	}
+	setSuggestion("No PO number found in the email. Search for the order below.");
+}
+
+// Pre-fill what was read from the email; the invoice option starts ticked when the email
+// looks like an invoice (an invoice number was found, or "invoice" is in the subject).
+function fillInvoiceDetails(invoice, subject) {
+	$("invoiceNumber").value = invoice.supplier_invoice_number || "";
+	$("invoiceDate").value = invoice.invoice_date || emailDateISO();
+	$("dueDate").value = invoice.due_date || todayISO();
+	$("enterInvoice").checked =
+		Boolean(invoice.supplier_invoice_number) || INVOICE_WORD_PATTERN.test(subject || "");
+	refreshInvoiceInputs();
+}
+
+function setSuggestion(text) {
+	$("suggestion").textContent = text;
+	show("suggestion");
+}
+
+function isEnteringInvoice() {
+	return $("doctype").value === ORDER_TYPE && Boolean(state.target) && $("enterInvoice").checked;
+}
+
+function refreshInvoiceInputs() {
+	$("invoiceInputs").classList.toggle("hidden", !$("enterInvoice").checked);
+	refreshFileButton();
+}
+
+function emailDateISO() {
+	const created = Office.context.mailbox.item.dateTimeCreated;
+	return toLocalISODate(created ? new Date(created) : new Date());
+}
+
+function todayISO() {
+	return toLocalISODate(new Date());
+}
+
+function toLocalISODate(date) {
+	const pad = (number) => String(number).padStart(DATE_PART_WIDTH, "0");
+	return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+/* ---- Create new Supplier Quote: pick the job, and the supplier when it is not known ---- */
+
+// A small type-ahead picker: search as the user types, list results, remember the choice.
+function wirePicker(prefix, search, onChoose) {
+	let timer = null;
+	$(`${prefix}Search`).addEventListener("input", () => {
+		clearTimeout(timer);
+		const txt = $(`${prefix}Search`).value.trim();
+		if (txt.length < MIN_SEARCH_CHARS) {
+			$(`${prefix}Results`).innerHTML = "";
+			return;
+		}
+		timer = setTimeout(
+			() => runPickerSearch(prefix, search, onChoose, txt),
+			SEARCH_DEBOUNCE_MS
+		);
+	});
+}
+
+async function runPickerSearch(prefix, search, onChoose, txt) {
+	const list = $(`${prefix}Results`);
+	try {
+		const rows = await search(txt);
+		list.innerHTML = "";
+		if (!rows || !rows.length) {
+			appendMessageRow(list, "No matches found.");
+			return;
+		}
+		rows.forEach((row) =>
+			list.appendChild(
+				buildResultRow(row, () => {
+					list.innerHTML = "";
+					$(`${prefix}Search`).value = "";
+					onChoose(row);
+				})
+			)
+		);
+	} catch (e) {
+		list.innerHTML = "";
+		appendMessageRow(list, "Search error: " + (e.message || e));
+	}
+}
+
+function chooseProject(row) {
+	state.project = { value: row.value, label: row.label };
+	$("projectChosen").textContent = `→ ${row.label}`;
+	show("projectChosen");
+	refreshFileButton();
+}
+
+function chooseSupplier(row) {
+	state.supplier = { value: row.value, label: row.label };
+	$("supplierChosen").textContent = `→ ${row.label}`;
+	show("supplierChosen");
+	$("supplierHint").textContent = "Change it by searching below.";
+}
+
+// Show the job and supplier pickers, with the supplier filled in when the sender's contact
+// already belongs to one. Otherwise the PDF decides, or the user picks.
+async function showQuoteFields() {
+	state.project = null;
+	state.supplier = null;
+	hide("projectChosen");
+	hide("supplierChosen");
+	$("supplierHint").textContent = "Checking the sender's company…";
+	show("quoteFields");
+	try {
+		const known = await apiGet("procurement:GetSenderSupplier", {
+			sender_email: state.senderEmail,
+		});
+		if (known && known.supplier) {
+			chooseSupplier(known.supplier);
+			$("supplierHint").textContent =
+				"From the sender's contact. Change it by searching below.";
+			return;
+		}
+	} catch {
+		/* fall through: the user can still pick, or let the PDF decide */
+	}
+	$("supplierHint").textContent =
+		"Not known from the sender. Pick it, or leave it blank to read it from the quote PDF.";
+}
 
 // Choose to create a new Contact or Candidate from the open email's sender,
 // instead of an existing record.
@@ -451,11 +688,14 @@ function chooseCreateNew() {
 	$("results").innerHTML = "";
 	$("search").value = "";
 	hide("createNew");
-	$("chosen").textContent = `→ New ${createWord}: ${who}`;
+	$("chosen").textContent =
+		doctype === QUOTE_TYPE
+			? "→ New supplier quote from this email"
+			: `→ New ${createWord}: ${who}`;
 	show("chosen");
+	if (doctype === QUOTE_TYPE) showQuoteFields();
 	refreshFileButton();
 }
-
 
 let searchTimer = null;
 function onSearchInput() {
@@ -463,20 +703,47 @@ function onSearchInput() {
 	const txt = $("search").value.trim();
 	const isTicket = $("doctype").value === TICKET_TYPE;
 	// Ticket types are a short list: an empty box shows them all again.
-	if (!isTicket && txt.length < MIN_SEARCH_CHARS) { $("results").innerHTML = ""; return; }
+	if (!isTicket && txt.length < MIN_SEARCH_CHARS) {
+		$("results").innerHTML = "";
+		return;
+	}
 	searchTimer = setTimeout(() => runSearch(txt), SEARCH_DEBOUNCE_MS);
 }
-
 
 function setResultsMessage(message) {
 	const list = $("results");
 	list.innerHTML = "";
-	const li = document.createElement("li");
-	li.textContent = message;
-	li.className = "result-message";
-	list.appendChild(li);
+	appendMessageRow(list, message);
 }
 
+function appendMessageRow(list, message) {
+	const listItem = document.createElement("li");
+	listItem.textContent = message;
+	listItem.className = "result-message";
+	list.appendChild(listItem);
+}
+
+// One clickable picker row: the label, with its detail (email, supplier…) beneath it.
+function buildResultRow(row, onClick) {
+	const listItem = document.createElement("li");
+	const main = document.createElement("div");
+	main.textContent = row.label;
+	listItem.appendChild(main);
+	if (row.sublabel) {
+		const sub = document.createElement("div");
+		sub.className = "result-sub";
+		sub.textContent = row.sublabel;
+		listItem.appendChild(sub);
+	}
+	listItem.addEventListener("click", onClick);
+	return listItem;
+}
+
+function renderResultRows(doctype, rows) {
+	const list = $("results");
+	list.innerHTML = "";
+	rows.forEach((row) => list.appendChild(buildResultRow(row, () => chooseTarget(doctype, row))));
+}
 
 async function runSearch(txt) {
 	const doctype = $("doctype").value;
@@ -485,45 +752,31 @@ async function runSearch(txt) {
 		const rows = await apiGet("SearchTargets", { target_doctype: doctype, txt });
 		// The user switched type while this search was in flight: drop the stale results.
 		if ($("doctype").value !== doctype) return;
-		const list = $("results");
-		list.innerHTML = "";
 		if (!rows || !rows.length) {
 			setResultsMessage("No matches found.");
 			return;
 		}
-		rows.forEach(row => {
-			const li = document.createElement("li");
-			const main = document.createElement("div");
-			main.textContent = row.label;
-			li.appendChild(main);
-			if (row.sublabel) {
-				const sub = document.createElement("div");
-				sub.className = "result-sub";
-				sub.textContent = row.sublabel;
-				li.appendChild(sub);
-			}
-			li.addEventListener("click", () => chooseTarget(doctype, row));
-			list.appendChild(li);
-		});
+		renderResultRows(doctype, rows);
 	} catch (e) {
 		setResultsMessage("Search error: " + (e.message || e));
 	}
 }
-
 
 function chooseTarget(doctype, row) {
 	state.target = { doctype, value: row.value, label: row.label, create: false };
 	$("results").innerHTML = "";
 	$("search").value = "";
 	hide("createNew");
+	hide("quoteFields");
 	$("chosen").textContent = `→ ${row.label}${row.sublabel ? " · " + row.sublabel : ""}`;
 	show("chosen");
+	// A chosen order can take the email as its supplier invoice.
+	if (doctype === ORDER_TYPE) show("invoiceFields");
 	refreshFileButton();
 }
 
-
 function refreshFileButton() {
-	const hasAttachmentsSelected = state.attachments.some(a => a.selected);
+	const hasAttachmentsSelected = state.attachments.some((a) => a.selected);
 	const wantsEmail = $("saveEmail").checked;
 	const doctype = $("doctype").value;
 	const hasComment = $("comment").value.trim() !== "";
@@ -533,49 +786,105 @@ function refreshFileButton() {
 	let hasContent = hasAttachmentsSelected || wantsEmail || hasComment;
 	if (doctype === TASK_TYPE) hasContent = true;
 	if (doctype === TICKET_TYPE) hasContent = wantsEmail || hasComment;
+	// A new quote needs its job; an invoice needs the supplier's invoice number.
+	const isNewQuote = doctype === QUOTE_TYPE && state.target && state.target.create;
+	if (isNewQuote) hasContent = hasContent && Boolean(state.project);
+	if (isEnteringInvoice()) hasContent = $("invoiceNumber").value.trim() !== "";
 	$("fileBtn").disabled = !state.target || !hasContent;
+	$("fileBtn").textContent = buttonText(doctype, isNewQuote);
 }
 
+function buttonText(doctype, isNewQuote) {
+	if (isEnteringInvoice()) return INVOICE_BUTTON_TEXT;
+	if (isNewQuote) return QUOTE_BUTTON_TEXT;
+	return (MODE_TEXT[doctype] || RECORD_MODE_TEXT).button;
+}
 
 async function onFile() {
 	const btn = $("fileBtn");
 	btn.disabled = true;
-	setStatus("Filing…", "");
+	hide("openRecord");
+	const isInvoice = isEnteringInvoice();
+	setStatus(isInvoice ? "Entering the supplier invoice…" : "Filing…", "");
 	try {
-		const selected = state.attachments.filter(a => a.selected);
-		const payload = [];
-		for (const a of selected) {
-			const content = await getAttachmentContent(a.id);
-			payload.push({ file_name: a.name, content_base64: content.content, content_type: content.format });
-		}
-		const meta = emailMeta();
-		const isCreate = state.target.create === true;
-		const result = await apiPost("FileEmailToRecord", Object.assign({
-			target_doctype: state.target.doctype,
-			target_name: state.target.value,
-			create_new: isCreate ? 1 : 0,
-			new_name: isCreate ? state.senderName : "",
-			new_email: isCreate ? state.senderEmail : "",
-			save_email: $("saveEmail").checked ? 1 : 0,
-			comment: $("comment").value,
-			body_html: await getEmailBodyHtml(),
-			attachments: JSON.stringify(payload),
-		}, meta));
+		const payload = await readAttachmentPayload(false);
+		const common = Object.assign(
+			{
+				save_email: $("saveEmail").checked ? 1 : 0,
+				comment: $("comment").value,
+				body_html: await getEmailBodyHtml(),
+				attachments: JSON.stringify(payload),
+				message_id: emailMessageId(),
+			},
+			emailMeta()
+		);
+		const result = isInvoice ? await enterSupplierInvoice(common) : await fileToRecord(common);
 		setStatus(result.message || "Done.", "ok");
+		showOpenRecord(result.record_url);
 	} catch (e) {
 		setStatus(e.message || "Something went wrong.", "err");
 	} finally {
 		btn.disabled = false;
+		refreshFileButton();
 	}
 }
 
+function fileToRecord(common) {
+	const isCreate = state.target.create === true;
+	return apiPost(
+		"FileEmailToRecord",
+		Object.assign(
+			{
+				target_doctype: state.target.doctype,
+				target_name: state.target.value,
+				create_new: isCreate ? 1 : 0,
+				new_name: isCreate ? state.senderName : "",
+				new_email: isCreate ? state.senderEmail : "",
+				project: isCreate && state.project ? state.project.value : "",
+				supplier: isCreate && state.supplier ? state.supplier.value : "",
+			},
+			common
+		)
+	);
+}
+
+function enterSupplierInvoice(common) {
+	return apiPost(
+		"procurement:EnterSupplierInvoice",
+		Object.assign(
+			{
+				purchase_order: state.target.value,
+				supplier_invoice_number: $("invoiceNumber").value.trim(),
+				invoice_date: $("invoiceDate").value,
+				due_date: $("dueDate").value,
+			},
+			common
+		)
+	);
+}
+
+// Offer to open the record just created or filed to, in the user's browser.
+function showOpenRecord(url) {
+	if (!url) return;
+	$("openRecord").dataset.url = url;
+	show("openRecord");
+}
+
+function openRecord() {
+	const url = $("openRecord").dataset.url;
+	if (!url) return;
+	if (Office.context.ui && Office.context.ui.openBrowserWindow) {
+		Office.context.ui.openBrowserWindow(url);
+		return;
+	}
+	window.open(url, "_blank", "noopener");
+}
 
 function setStatus(text, kind) {
 	const el = $("status");
 	el.textContent = text;
 	el.className = "status" + (kind ? " " + kind : "");
 }
-
 
 async function enterFilingView(user) {
 	hide("loginView");
@@ -590,7 +899,6 @@ async function enterFilingView(user) {
 	refreshFileButton();
 }
 
-
 async function doSignIn() {
 	$("loginError").textContent = "";
 	$("loginStatus").textContent = "Signing in with Microsoft 365…";
@@ -599,7 +907,9 @@ async function doSignIn() {
 		await auth.signIn();
 		const session = await apiGet("GetSession");
 		if (!session || session.user === "Guest") {
-			throw new Error("Your Microsoft account isn't linked to an ERP user. Contact your administrator.");
+			throw new Error(
+				"Your Microsoft account isn't linked to an ERP user. Contact your administrator."
+			);
 		}
 		await establishErpSession();
 		await enterFilingView(session.user);
@@ -610,7 +920,6 @@ async function doSignIn() {
 	}
 }
 
-
 function wireEvents() {
 	$("loginBtn").addEventListener("click", doSignIn);
 	$("signOutBtn").addEventListener("click", signOut);
@@ -620,13 +929,24 @@ function wireEvents() {
 	$("saveEmail").addEventListener("change", refreshFileButton);
 	$("comment").addEventListener("input", refreshFileButton);
 	$("fileBtn").addEventListener("click", onFile);
+	$("openRecord").addEventListener("click", openRecord);
+	$("enterInvoice").addEventListener("change", refreshInvoiceInputs);
+	$("invoiceNumber").addEventListener("input", refreshFileButton);
+	wirePicker(
+		"project",
+		(txt) => apiGet("SearchTargets", { target_doctype: PROJECT_TYPE, txt }),
+		chooseProject
+	);
+	wirePicker(
+		"supplier",
+		(txt) => apiGet("procurement:SearchSuppliers", { txt }),
+		chooseSupplier
+	);
 }
-
 
 // Render the environment badge immediately — it is pure DOM and must not depend
 // on the Office host initializing (so it shows even if Office.js is slow).
 applyEnvBadges();
-
 
 Office.onReady(async () => {
 	wireEvents();
