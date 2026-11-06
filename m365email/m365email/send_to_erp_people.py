@@ -29,7 +29,7 @@ ORGANISATION = "Organisation"
 
 MAX_BODY_CHARS = 50000
 MAX_HTML_CHARS = 2_000_000  # Outlook HTML is heavy; the headers sit near the top
-LINE_BREAK_TAG_PATTERN = re.compile(r"<(?:br|/p|/div|/tr|/li|hr)\b[^<>]{0,200}>", re.IGNORECASE)
+LINE_BREAK_TAG_PATTERN = re.compile(r"<(?:br|/p|/div|/tr|/li|hr)\b[^<>]*>", re.IGNORECASE)
 # NOTE: Our own tag remover, not frappe.utils.strip_html: that one's "<[^>]*>" retries at
 #       every unmatched "<", so a body of 2 MB of "<" took seconds (Codex review, 2026-11-07).
 #       A tag here cannot contain "<", so each attempt stops at the next "<" or ">" and the
