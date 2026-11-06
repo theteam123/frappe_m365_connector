@@ -263,6 +263,38 @@
       </div>
     </div>
 
+    <div class="step">
+      <div class="n">6</div>
+      <div class="txt">
+        <h4>Procurement: a supplier's quote</h4>
+        <p>Choose <strong>Supplier Quote</strong> as the Type. To file the email on a quote that already
+        exists, search for it. To make a new one, click <strong>Create new supplier quote from this
+        email</strong>, then pick the <strong>Job</strong>.</p>
+        <p>The supplier is filled in from the sender's contact when ERP knows their company. If it
+        doesn't, pick the supplier, or leave it blank and ERP reads it from the quote PDF (by ABN, then
+        email address). The sender becomes the quote's supplier contact, and the PDF is attached. Click
+        <strong>Create supplier quote</strong>, then <strong>Open in ERP</strong> to add the lines
+        (the quote's <strong>Import from CSV</strong> button reads PDFs: give it the attached quote).</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="n">7</div>
+      <div class="txt">
+        <h4>Procurement: a supplier's invoice</h4>
+        <p>Choose <strong>Purchase Order</strong> as the Type. The panel looks for our PO number
+        (for example PORD-3285-012) in the subject, then the email text, then the PDF, and picks that
+        order for you. If the email names several orders, it lists them so you can choose.</p>
+        <p>Tick <strong>Enter as a supplier invoice</strong> (already ticked when it looks like an
+        invoice), check the <strong>supplier invoice number</strong> and dates it read, and click
+        <strong>Enter Supplier Invoice</strong>. A draft invoice is created against the order with every
+        line not yet invoiced, and the PDF and email attached. Click <strong>Open in ERP</strong> to
+        check it; for a part-invoice, lower or remove lines there.</p>
+        <p>Clicking twice on the same email never makes a second quote or invoice: the panel tells
+        you the one already created.</p>
+      </div>
+    </div>
+
     <!-- 4 -->
     <h2><span class="num">4.</span>How it works <span style="font-size:15px;font-weight:600;color:var(--muted)">(for the curious / IT)</span></h2>
     <div class="grid">

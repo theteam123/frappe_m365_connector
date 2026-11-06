@@ -6,7 +6,7 @@
 	<title>Send to ERP</title>
 	<script src="https://appsforoffice.microsoft.com/lib/1.1/hosted/office.js"></script>
 	<script src="msal-browser.min.js"></script>
-	<link rel="stylesheet" href="taskpane.css?v=9" />
+	<link rel="stylesheet" href="taskpane.css?v=10" />
 </head>
 <body>
 	<main id="app">
@@ -45,6 +45,35 @@
 				<ul id="results" class="results"></ul>
 				<button type="button" id="createNew" class="link hidden"></button>
 				<p id="chosen" class="chosen hidden"></p>
+				<p id="suggestion" class="muted hidden" role="status"></p>
+
+				<!-- Create new Supplier Quote: the job, and the supplier when it is not known -->
+				<div id="quoteFields" class="hidden">
+					<label for="projectSearch">Job</label>
+					<input id="projectSearch" type="text" placeholder="Search jobs…" autocomplete="off" />
+					<ul id="projectResults" class="results"></ul>
+					<p id="projectChosen" class="chosen hidden"></p>
+					<label for="supplierSearch">Supplier</label>
+					<p id="supplierHint" class="muted hint"></p>
+					<input id="supplierSearch" type="text" placeholder="Search suppliers…" autocomplete="off" />
+					<ul id="supplierResults" class="results"></ul>
+					<p id="supplierChosen" class="chosen hidden"></p>
+				</div>
+			</fieldset>
+
+			<!-- Purchase Order: enter the email as a supplier invoice against the order -->
+			<fieldset id="invoiceFields" class="hidden">
+				<legend>Supplier invoice</legend>
+				<label class="check"><input id="enterInvoice" type="checkbox" /> Enter as a supplier invoice</label>
+				<div id="invoiceInputs">
+					<label for="invoiceNumber">Supplier invoice number</label>
+					<input id="invoiceNumber" type="text" autocomplete="off" />
+					<label for="invoiceDate">Invoice date</label>
+					<input id="invoiceDate" type="date" />
+					<label for="dueDate">Due date</label>
+					<input id="dueDate" type="date" />
+					<p class="muted hint">The draft gets every line not yet invoiced on the order. Check it in ERP.</p>
+				</div>
 			</fieldset>
 
 			<fieldset>
@@ -53,10 +82,11 @@
 			</fieldset>
 
 			<button id="fileBtn" class="primary" disabled>Attach to ERP</button>
-			<p id="status" class="status"></p>
+			<p id="status" class="status" role="status"></p>
+			<button type="button" id="openRecord" class="link hidden">Open in ERP ↗</button>
 		</section>
 	</main>
 
-	<script src="taskpane.js?v=9"></script>
+	<script src="taskpane.js?v=10"></script>
 </body>
 </html>
