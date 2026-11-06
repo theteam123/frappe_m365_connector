@@ -1,0 +1,93 @@
+{
+ "actions": [],
+ "creation": "2026-11-06 09:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "profile_name",
+  "description",
+  "match_key",
+  "licence_section",
+  "licence_name",
+  "licence_sku_id",
+  "groups_section",
+  "groups"
+ ],
+ "fields": [
+  {
+   "fieldname": "profile_name",
+   "fieldtype": "Data",
+   "label": "Profile Name",
+   "reqd": 1,
+   "unique": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
+  },
+  {
+   "fieldname": "match_key",
+   "fieldtype": "Data",
+   "label": "Match Key",
+   "description": "Optional. A caller (for example HR) picks this profile by default when its own key equals this text, such as an onboarding template name."
+  },
+  {
+   "fieldname": "licence_section",
+   "fieldtype": "Section Break",
+   "label": "Licence"
+  },
+  {
+   "fieldname": "licence_name",
+   "fieldtype": "Data",
+   "label": "Licence Name",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "licence_sku_id",
+   "fieldtype": "Data",
+   "label": "Licence SKU ID",
+   "description": "The licence's SKU ID (a GUID) from Microsoft. Leave blank to assign no licence."
+  },
+  {
+   "fieldname": "groups_section",
+   "fieldtype": "Section Break",
+   "label": "Groups"
+  },
+  {
+   "fieldname": "groups",
+   "fieldtype": "Table",
+   "label": "Groups",
+   "options": "M365 Provisioning Profile Group"
+  }
+ ],
+ "links": [],
+ "modified": "2026-11-06 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "M365Email",
+ "name": "M365 Provisioning Profile",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 0,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "HR Manager"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "autoname": "field:profile_name",
+ "allow_rename": 1,
+ "title_field": "profile_name",
+ "show_title_field_in_link": 1,
+ "track_changes": 1
+}

@@ -1,0 +1,97 @@
+{
+ "actions": [],
+ "creation": "2026-11-06 09:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "mode",
+  "credentials_section",
+  "tenant_id",
+  "client_id",
+  "client_secret",
+  "defaults_section",
+  "default_domain",
+  "usage_location",
+  "force_password_change"
+ ],
+ "fields": [
+  {
+   "fieldname": "mode",
+   "fieldtype": "Select",
+   "label": "Mode",
+   "options": "Off\nSimulation\nLive",
+   "default": "Simulation",
+   "reqd": 1,
+   "description": "Off: refuse all actions. Simulation: no calls to Microsoft; results are fake and logged as Simulation. Live: real changes in Microsoft 365."
+  },
+  {
+   "fieldname": "credentials_section",
+   "fieldtype": "Section Break",
+   "label": "Entra App Registration"
+  },
+  {
+   "fieldname": "tenant_id",
+   "fieldtype": "Data",
+   "label": "Tenant ID"
+  },
+  {
+   "fieldname": "client_id",
+   "fieldtype": "Data",
+   "label": "Client ID"
+  },
+  {
+   "fieldname": "client_secret",
+   "fieldtype": "Password",
+   "label": "Client Secret"
+  },
+  {
+   "fieldname": "defaults_section",
+   "fieldtype": "Section Break",
+   "label": "New Account Defaults"
+  },
+  {
+   "fieldname": "default_domain",
+   "fieldtype": "Data",
+   "label": "Default Domain",
+   "description": "For example sgcaustralia.com.au (without the @)."
+  },
+  {
+   "fieldname": "usage_location",
+   "fieldtype": "Data",
+   "label": "Usage Location",
+   "default": "AU",
+   "description": "Two-letter country code Microsoft needs before it can assign a licence."
+  },
+  {
+   "fieldname": "force_password_change",
+   "fieldtype": "Check",
+   "label": "Force Password Change at First Sign-in",
+   "default": "1"
+  }
+ ],
+ "links": [],
+ "modified": "2026-11-06 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "M365Email",
+ "name": "M365 Provisioning Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "issingle": 1,
+ "index_web_pages_for_search": 0,
+ "editable_grid": 0,
+ "allow_rename": 0
+}
