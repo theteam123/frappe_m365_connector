@@ -33,6 +33,7 @@ PURCHASE_ORDER = "Purchase Order"
 PURCHASE_INVOICE = "Purchase Invoice"
 ORGANISATION = "Organisation"
 CONTACT = "Contact"
+USER = "User"
 
 # NOTE: Detection reads at most this much of each PDF. Larger files are still attached, they
 #       are just not read, so a huge scan cannot tie up a web worker.
@@ -178,7 +179,11 @@ def CreateSupplierQuoteFromEmail(
 		message = _("Couldn't tell which supplier this quote is from. Pick the supplier.")
 		frappe.throw(message)
 
-	if not contactName and frappe.has_permission(CONTACT, "create"):
+	# NOTE: A quote forwarded by a colleague comes "from" them. Our own staff are never the
+	#       supplier's contact, so no contact is created for them (the supplier still comes
+	#       from a pick or the PDF), and FindSenderContact never returns theirs.
+	shouldCreateContact = not contactName and frappe.has_permission(CONTACT, "create")
+	if shouldCreateContact and not IsInternalSender(sender["email"]):
 		senderName, senderEmail, bodyHTML = sender["name"], sender["email"], sender["body_html"]
 		newContact = filing._CreateContact(CONTACT, senderName, senderEmail, bodyHTML)
 		contactName = newContact[1]
@@ -365,10 +370,29 @@ def FindSenderContact(senderEmail: str) -> Optional[str]:
 	if not emailAddress:
 		return None
 
+	if IsInternalSender(emailAddress):
+		return None
+
 	contactName = frappe.db.get_value("Contact Email", {"email_id": emailAddress}, "parent")
 	if not contactName or not frappe.has_permission(CONTACT, "read", contactName):
 		return None
 	return contactName
+
+
+
+def IsInternalSender(senderEmail: str) -> bool:
+	"""True when the address belongs to one of our own ERP users (a colleague, not a supplier).
+
+	Paul, 2026-11-07: procurement often forwards a supplier's quote internally, so the
+	email's sender is then a colleague. Treating them as the supplier contact would file the
+	quote under the wrong person and could write the supplier onto a staff contact.
+	"""
+	emailAddress = (senderEmail or "").strip().lower()
+	if not emailAddress:
+		return False
+	if frappe.db.exists(USER, emailAddress):
+		return True
+	return bool(frappe.db.exists(USER, {"email": emailAddress}))
 
 
 
