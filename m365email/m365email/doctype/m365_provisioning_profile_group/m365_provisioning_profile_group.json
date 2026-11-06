@@ -1,0 +1,39 @@
+{
+ "actions": [],
+ "creation": "2026-11-06 09:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "group_id",
+  "group_name"
+ ],
+ "fields": [
+  {
+   "fieldname": "group_id",
+   "fieldtype": "Data",
+   "label": "Group ID",
+   "in_list_view": 1,
+   "reqd": 1,
+   "description": "The Entra group's object ID (a GUID)."
+  },
+  {
+   "fieldname": "group_name",
+   "fieldtype": "Data",
+   "label": "Group Name",
+   "in_list_view": 1,
+   "reqd": 1
+  }
+ ],
+ "links": [],
+ "modified": "2026-11-06 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "M365Email",
+ "name": "M365 Provisioning Profile Group",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "istable": 1,
+ "editable_grid": 1
+}
