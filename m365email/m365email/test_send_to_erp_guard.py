@@ -205,3 +205,11 @@ class TestInternalSender(unittest.TestCase):
 
 	def test_colleague_never_yields_a_contact(self) -> None:
 		self.assertIsNone(self.procurement.FindSenderContact("angela.obrien@sgcaustralia.com.au"))
+
+
+	def test_match_on_user_email_field(self) -> None:
+		self.assertTrue(self.procurement.IsInternalSender("ANGELA.OBRIEN@sgcaustralia.com.au"))
+
+
+	def test_empty_sender_is_not_internal(self) -> None:
+		self.assertFalse(self.procurement.IsInternalSender(""))

@@ -182,8 +182,8 @@ def CreateSupplierQuoteFromEmail(
 	# NOTE: A quote forwarded by a colleague comes "from" them. Our own staff are never the
 	#       supplier's contact, so no contact is created for them (the supplier still comes
 	#       from a pick or the PDF), and FindSenderContact never returns theirs.
-	isInternal = IsInternalSender(sender["email"])
-	if not contactName and not isInternal and frappe.has_permission(CONTACT, "create"):
+	shouldCreateContact = not contactName and frappe.has_permission(CONTACT, "create")
+	if shouldCreateContact and not IsInternalSender(sender["email"]):
 		senderName, senderEmail, bodyHTML = sender["name"], sender["email"], sender["body_html"]
 		newContact = filing._CreateContact(CONTACT, senderName, senderEmail, bodyHTML)
 		contactName = newContact[1]
