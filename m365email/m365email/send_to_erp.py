@@ -288,11 +288,12 @@ def FileEmailToRecord(
 		if target_doctype == SUPPLIER_QUOTE_TARGET:
 			from m365email.m365email.send_to_erp_procurement import CreateSupplierQuoteFromEmail
 
-			sender = {
+			# NOTE: Not called "sender": that is this endpoint's sender address, used below.
+			senderDetails = {
 				"name": new_name, "email": new_email, "body_html": body_html, "sent_date": sent_date,
 			}
 			recordDoctype, recordName, creationNote = CreateSupplierQuoteFromEmail(
-				project, supplier, sender, attachmentList,
+				project, supplier, senderDetails, attachmentList,
 			)
 		else:
 			recordDoctype, recordName = CreateRecordFromSender(
