@@ -70,7 +70,15 @@ legend { font-weight: 600; padding: 0 4px; }
 .muted { color: var(--muted); }
 .error { color: var(--error); min-height: 16px; }
 .status { min-height: 16px; }
-.status.ok { color: var(--ok); }
+.status.ok {
+	color: var(--ok);
+	background: #ecfdf5;
+	border-left: 4px solid var(--ok);
+	border-radius: 6px;
+	padding: 8px 12px;
+	font-weight: 600;
+}
+.status.ok::before { content: "✓ "; }
 .status.err { color: var(--error); }
 
 .attachments label { font-weight: 400; display: flex; align-items: center; gap: 6px; margin: 6px 0; }

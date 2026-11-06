@@ -179,10 +179,10 @@ class TestParseAttachments(unittest.TestCase):
 
 class TestInternalSender(unittest.TestCase):
 	def setUp(self) -> None:
-		from m365email.m365email import send_to_erp_procurement
+		from m365email.m365email import send_to_erp_people
 
-		self.procurement = send_to_erp_procurement
-		frappeDB = send_to_erp_procurement.frappe.db
+		self.people = send_to_erp_people
+		frappeDB = send_to_erp_people.frappe.db
 		existsPatch = patch.object(frappeDB, "exists", side_effect=self.fakeExists)
 		existsPatch.start()
 		self.addCleanup(existsPatch.stop)
@@ -190,26 +190,26 @@ class TestInternalSender(unittest.TestCase):
 
 	def fakeExists(self, doctype: str, filters: object) -> bool:
 		staff = {"angela.obrien@sgcaustralia.com.au"}
-		if isinstance(filters, dict):
-			return filters.get("email") in staff
-		return filters in staff
+		if not isinstance(filters, dict) or filters.get("user_type") != "System User":
+			return False
+		return (filters.get("email") or filters.get("name")) in staff
 
 
 	def test_colleague_is_internal(self) -> None:
-		self.assertTrue(self.procurement.IsInternalSender(" Angela.OBrien@sgcaustralia.com.au "))
+		self.assertTrue(self.people.IsInternalSender(" Angela.OBrien@sgcaustralia.com.au "))
 
 
 	def test_supplier_is_not_internal(self) -> None:
-		self.assertFalse(self.procurement.IsInternalSender("sales@miw.net.au"))
+		self.assertFalse(self.people.IsInternalSender("sales@miw.net.au"))
 
 
 	def test_colleague_never_yields_a_contact(self) -> None:
-		self.assertIsNone(self.procurement.FindSenderContact("angela.obrien@sgcaustralia.com.au"))
+		self.assertIsNone(self.people.FindContactForEmail("angela.obrien@sgcaustralia.com.au"))
 
 
 	def test_match_on_user_email_field(self) -> None:
-		self.assertTrue(self.procurement.IsInternalSender("ANGELA.OBRIEN@sgcaustralia.com.au"))
+		self.assertTrue(self.people.IsInternalSender("ANGELA.OBRIEN@sgcaustralia.com.au"))
 
 
 	def test_empty_sender_is_not_internal(self) -> None:
-		self.assertFalse(self.procurement.IsInternalSender(""))
+		self.assertFalse(self.people.IsInternalSender(""))
