@@ -337,6 +337,17 @@ def FileEmailToRecord(
 	# standard attachments, and capture their URLs for the email body.
 	createdFiles = _AttachFiles(attachmentList, recordDoctype, recordName)
 
+	# NOTE: A new Supplier Quote: import its PDF's lines when nothing needs a person, else
+	#       send "Open in ERP" to the import page with the PDF loaded (Paul, 2026-11-07).
+	#       Imported here, not at the top, because the procurement module imports this one.
+	recordURL = frappe.utils.get_url_to_form(recordDoctype, recordName)
+	if creationNote and recordDoctype == SUPPLIER_QUOTE_TARGET:
+		from m365email.m365email.send_to_erp_procurement import AutoImportNewQuote
+
+		importOutcome = AutoImportNewQuote(recordName, createdFiles)
+		creationNote = " ".join(part for part in (creationNote, importOutcome["note"]) if part)
+		recordURL = importOutcome["record_url"] or recordURL
+
 	# Build the email body: on a record, a filing note rides at the top so the
 	# comment shares the email's timeline entry; then the attachment links.
 	# (A task's email already exists — it was filed before the task so the task
@@ -374,7 +385,7 @@ def FileEmailToRecord(
 		"communication": communicationName,
 		"files": createdFiles,
 		"record": {"doctype": recordDoctype, "name": recordName},
-		"record_url": frappe.utils.get_url_to_form(recordDoctype, recordName),
+		"record_url": recordURL,
 		"message": summary,
 	}
 
