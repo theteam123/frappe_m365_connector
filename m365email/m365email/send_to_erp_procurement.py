@@ -45,6 +45,7 @@ MAX_SUBJECT_CHARS = 1000
 PDF_SIGNATURE = b"%PDF"
 PDF_EXTENSION = ".pdf"
 AUTO_IMPORT_SAVEPOINT = "sendtoerp_quote_autoimport"
+SUPPLIER_PICKED = "picked"  # erp supplier_quote.from_email.MATCHED_ON_PICKED
 IMPORT_PAGE_ROUTE = "supplier-quote-import"
 INVOICE_ATTACH_FIELD = "purchase_invoice_attach"
 # NOTE: base64 turns every 3 bytes into 4 characters, so the encoded length gives the size.
@@ -279,10 +280,16 @@ def BuildImportPageURL(quoteName: str, fileURL: str) -> str:
 
 def BuildSupplierNote(detection: dict) -> str:
 	"""Say which supplier was used and how; the name only to someone who may read it."""
+	canRead = frappe.has_permission(ORGANISATION, "read", detection["organisation"])
+	name = detection["organisation_name"] if canRead else ""
+	# NOTE: A supplier the user picked needs no explanation of where it came from.
+	if detection["matched_on"] == SUPPLIER_PICKED:
+		return _("Supplier {0}.").format(name) if name else ""
+
 	source = _(detection["matched_on"])
-	if not frappe.has_permission(ORGANISATION, "read", detection["organisation"]):
+	if not name:
 		return _("Supplier set from the {0}.").format(source)
-	return _("Supplier {0} (from the {1}).").format(detection["organisation_name"], source)
+	return _("Supplier {0} (from the {1}).").format(name, source)
 
 
 
