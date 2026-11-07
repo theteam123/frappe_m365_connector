@@ -22,6 +22,7 @@ user's own permissions.
 
 import base64
 from typing import Optional
+from urllib.parse import urlencode
 
 import frappe
 from frappe import _
@@ -43,6 +44,8 @@ MAX_EMAIL_TEXT_CHARS = 50000
 MAX_SUBJECT_CHARS = 1000
 PDF_SIGNATURE = b"%PDF"
 PDF_EXTENSION = ".pdf"
+AUTO_IMPORT_SAVEPOINT = "sendtoerp_quote_autoimport"
+IMPORT_PAGE_ROUTE = "supplier-quote-import"
 INVOICE_ATTACH_FIELD = "purchase_invoice_attach"
 # NOTE: base64 turns every 3 bytes into 4 characters, so the encoded length gives the size.
 BASE64_RATIO = 4 / 3
@@ -203,6 +206,74 @@ def CreateSupplierQuoteFromEmail(
 	LinkContactToSupplier(contactName, organisation)
 
 	return (SUPPLIER_QUOTE, quote.name, BuildSupplierNote(detection))
+
+
+
+def AutoImportNewQuote(quoteName: str, createdFiles: list[dict]) -> dict:
+	"""Import a new quote's PDF lines when nothing needs a person; else hand over to the page.
+
+	The import runs inside a savepoint: if it fails part-way, only the import is undone and
+	the quote, its files and the email are still filed.
+
+	Returns:
+		{"note": a sentence for the panel, "record_url": the import page to finish on, or None}.
+	"""
+	from erp.procurement.doctype.supplier_quote.from_email import (
+		AUTO_IMPORT_IMPORTED,
+		TryAutoImportQuoteFile,
+	)
+
+	pdfFiles = [
+		attachment for attachment in createdFiles
+		if attachment["file_name"].lower().endswith(PDF_EXTENSION)
+	]
+	if not pdfFiles:
+		return {"note": "", "record_url": None}
+
+	fileURL = pdfFiles[0]["file_url"]
+	frappe.db.savepoint(AUTO_IMPORT_SAVEPOINT)
+	try:
+		outcome = TryAutoImportQuoteFile(quoteName, fileURL)
+	except Exception:
+		UndoFailedImport(quoteName)
+		frappe.log_error(title="Send to ERP: automatic quote import failed")
+		outcome = {"status": "", "reason": _("the PDF could not be read automatically")}
+
+	if outcome["status"] == AUTO_IMPORT_IMPORTED:
+		note = _("Imported {0} line(s) from the PDF.").format(outcome["imported"])
+		return {"note": note, "record_url": None}
+
+	message = _("Lines not imported automatically: {0}. Open in ERP to check them and import.")
+	importPageURL = BuildImportPageURL(quoteName, fileURL)
+	return {"note": message.format(outcome["reason"]), "record_url": importPageURL}
+
+
+
+def UndoFailedImport(quoteName: str) -> None:
+	"""Undo a failed automatic import, and only that.
+
+	Normally the savepoint does it. But reading some PDFs logs an AI call with its own commit,
+	which saves the quote and files so far and ends the savepoint (Codex review, 2026-11-07).
+	Then only the unsaved import work is left to undo, which a plain rollback does; the quote
+	and its files stay, and filing carries on. If that rollback took the quote with it, the
+	savepoint was lost some other way: fail the whole request rather than report a quote
+	that no longer exists.
+	"""
+	try:
+		frappe.db.rollback(save_point=AUTO_IMPORT_SAVEPOINT)
+		return
+	except Exception:
+		frappe.db.rollback()
+
+	if not frappe.db.exists(SUPPLIER_QUOTE, quoteName):
+		frappe.throw(_("The supplier quote could not be saved. Please try again."))
+
+
+
+def BuildImportPageURL(quoteName: str, fileURL: str) -> str:
+	"""The import page, opened on this quote with its PDF already loaded."""
+	query = urlencode({"quote": quoteName, "file": fileURL})
+	return frappe.utils.get_url(f"/app/{IMPORT_PAGE_ROUTE}?{query}")
 
 
 
