@@ -42,6 +42,10 @@ def MakeResponse(statusCode: int, errorCode: str = "", retryAfter: str = "") -> 
 class TestMailboxExists(unittest.TestCase):
 
 	def setUp(self) -> None:
+		# NOTE: Unit tests do not have a site or translation cache.
+		translationPatcher = patch.object(graph_api, "_", side_effect=lambda message: message)
+		translationPatcher.start()
+		self.addCleanup(translationPatcher.stop)
 		throwPatcher = patch("frappe.throw", side_effect=RaiseValidationError)
 		throwPatcher.start()
 		self.addCleanup(throwPatcher.stop)
