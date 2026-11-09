@@ -235,9 +235,9 @@ auth_hooks = [
 # each overriding function accepts a `data` argument;
 # generated from the base implementation of the doctype dashboard,
 # along with any modifications made in other Frappe apps
-# override_doctype_dashboards = {
-# 	"Task": "m365email.task.get_dashboard_data"
-# }
+override_doctype_dashboards = {
+	"User": "m365email.m365email.user_connections.GetUserDashboardData",
+}
 
 # exempt linked doctypes from being automatically cancelled
 #
