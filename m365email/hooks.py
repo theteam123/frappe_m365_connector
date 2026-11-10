@@ -44,8 +44,7 @@ app_include_js = "/assets/m365email/js/email_queue_list.js"
 
 # include js in doctype views
 doctype_js = {
-	"Email Account": "public/js/email_account.js",
-	"User": "public/js/user.js"
+	"Email Account": "public/js/email_account.js"
 }
 doctype_list_js = {
 	"Email Queue": "public/js/email_queue_list.js"

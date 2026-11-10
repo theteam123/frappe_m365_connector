@@ -1,0 +1,26 @@
+name: Automatic mailbox provisioning
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  provisioning:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check out Frappe Framework
+        uses: actions/checkout@v4
+        with:
+          repository: frappe/frappe
+          ref: version-15
+          path: framework
+      - name: Install framework and connector dependencies
+        run: pip install ./framework -e .
+      - name: Verify automatic provisioning and mailbox failure handling
+        run: python -m unittest -v m365email.m365email.test_provisioning
