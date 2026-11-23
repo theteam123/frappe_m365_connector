@@ -148,11 +148,38 @@ def FormatSupplierRow(row: dict) -> dict:
 
 
 
+@frappe.whitelist()
+def SearchQuoteSubmissions(project: str = "", txt: str = "") -> list[dict]:
+	"""The job's live Submissions, for a new quote's optional Submission picker."""
+	from erp.procurement.doctype.supplier_quote.quote_activity import SearchSubmissions
+
+	AssertCanReadProject(project)
+	return SearchSubmissions(project, txt)
+
+
+
+@frappe.whitelist()
+def SearchQuoteActivities(project: str = "", submission: str = "", txt: str = "") -> list[dict]:
+	"""The job's open Activities (of the Submission, when picked), for the Activity picker."""
+	from erp.procurement.doctype.supplier_quote.quote_activity import SearchActivities
+
+	AssertCanReadProject(project)
+	return SearchActivities(project, submission, txt)
+
+
+
+def AssertCanReadProject(project: str) -> None:
+	if not project or not frappe.has_permission("Project", "read", project):
+		frappe.throw(_("You do not have access to that job."), frappe.PermissionError)
+
+
+
 def CreateSupplierQuoteFromEmail(
 	project: str,
 	supplier: str,
 	sender: dict,
 	attachmentList: list[dict],
+	jobPlace: dict | None = None,
 ) -> tuple[str, str, str]:
 	"""Create the Draft Supplier Quote for "Create new" on a quote email.
 
@@ -166,6 +193,7 @@ def CreateSupplierQuoteFromEmail(
 			the person the quote is from (the original sender of a forwarded email); contact
 			is a Contact the user picked, or "" to find or create one for that person.
 		attachmentList: The parsed attachments; PDFs among them are read for the supplier.
+		jobPlace: {submission, activity} the user picked on the job, either or both optional.
 
 	Returns:
 		("Supplier Quote", quote name, a sentence saying how the supplier was found).
@@ -203,14 +231,18 @@ def CreateSupplierQuoteFromEmail(
 
 	organisation = detection["organisation"]
 	quoteDate = filing._ParseEmailDate(sender["sent_date"]).date()
-	quote = CreateDraftQuoteFromEmail(project, organisation, contactName, quoteDate)
+	place = jobPlace or {}
+	submission, activity = place.get("submission") or None, place.get("activity") or None
+	quote = CreateDraftQuoteFromEmail(
+		project, organisation, contactName, quoteDate, submission, activity,
+	)
 	LinkContactToSupplier(contactName, organisation)
 
 	return (SUPPLIER_QUOTE, quote.name, BuildSupplierNote(detection))
 
 
 
-def AutoImportNewQuote(quoteName: str, createdFiles: list[dict]) -> dict:
+def AutoImportNewQuote(quoteName: str, createdFiles: list[dict], activity: str = "") -> dict:
 	"""Import a new quote's PDF lines when nothing needs a person; else hand over to the page.
 
 	The import runs inside a savepoint: if it fails part-way, only the import is undone and
@@ -234,7 +266,7 @@ def AutoImportNewQuote(quoteName: str, createdFiles: list[dict]) -> dict:
 	fileURL = pdfFiles[0]["file_url"]
 	frappe.db.savepoint(AUTO_IMPORT_SAVEPOINT)
 	try:
-		outcome = TryAutoImportQuoteFile(quoteName, fileURL)
+		outcome = TryAutoImportQuoteFile(quoteName, fileURL, activity or None)
 	except Exception:
 		UndoFailedImport(quoteName)
 		frappe.log_error(title="Send to ERP: automatic quote import failed")
@@ -245,7 +277,7 @@ def AutoImportNewQuote(quoteName: str, createdFiles: list[dict]) -> dict:
 		return {"note": note, "record_url": None}
 
 	message = _("Lines not imported automatically: {0}. Open in ERP to check them and import.")
-	importPageURL = BuildImportPageURL(quoteName, fileURL)
+	importPageURL = BuildImportPageURL(quoteName, fileURL, activity)
 	return {"note": message.format(outcome["reason"]), "record_url": importPageURL}
 
 
@@ -271,9 +303,12 @@ def UndoFailedImport(quoteName: str) -> None:
 
 
 
-def BuildImportPageURL(quoteName: str, fileURL: str) -> str:
-	"""The import page, opened on this quote with its PDF already loaded."""
-	query = urlencode({"quote": quoteName, "file": fileURL})
+def BuildImportPageURL(quoteName: str, fileURL: str, activity: str = "") -> str:
+	"""The import page, opened on this quote with its PDF (and picked Activity) already loaded."""
+	params = {"quote": quoteName, "file": fileURL}
+	if activity:
+		params["activity"] = activity
+	query = urlencode(params)
 	return frappe.utils.get_url(f"/app/{IMPORT_PAGE_ROUTE}?{query}")
 
 

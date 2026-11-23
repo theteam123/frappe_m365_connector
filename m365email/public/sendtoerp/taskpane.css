@@ -62,6 +62,9 @@ button.link {
 	text-align: left;
 }
 button.link:hover { text-decoration: underline; }
+/* NOTE: button.link sets display:block, which outranks the plain .hidden rule, so a
+   hidden link button (Create new, Open in ERP, Clear) still showed. */
+button.link.hidden { display: none; }
 
 fieldset { border: 1px solid var(--border); border-radius: 8px; margin: 12px 0; padding: 8px 12px 12px; }
 

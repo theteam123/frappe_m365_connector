@@ -218,6 +218,8 @@ def FileEmailToRecord(
 	supplier: str = "",
 	message_id: str = "",
 	contact: str = "",
+	submission: str = "",
+	activity: str = "",
 ) -> dict:
 	"""File an email and/or its attachments against a record or a new task.
 
@@ -249,6 +251,9 @@ def FileEmailToRecord(
 			2026-11-07: often a forwarded email's original sender). The filed email also shows
 			on that Contact's timeline; a new Supplier Quote takes it as supplier contact; a
 			support ticket names it.
+		submission: For "create new" Supplier Quote, an optional Submission on the job.
+		activity: For "create new" Supplier Quote, an optional Activity on the job; every
+			imported line goes under it (Paul, 2026-11-23).
 
 	Returns:
 		{success, communication, files, message, record, record_url} describing what was
@@ -261,7 +266,7 @@ def FileEmailToRecord(
 			return FileEmailToRecord(
 				target_doctype, target_name, subject, sender, recipients, sent_date, body_html,
 				save_email, comment, create_new, new_name, new_email, attachments, project, supplier,
-				"", contact,
+				"", contact, submission, activity,
 			)
 		# NOTE: The job is part of the key, so a quote for a second job is not mistaken for a repeat.
 		return RunOncePerEmail(f"create-{target_doctype}-{project}", message_id, createOnce)
@@ -306,8 +311,9 @@ def FileEmailToRecord(
 				"name": new_name, "email": new_email, "body_html": body_html, "sent_date": sent_date,
 				"contact": contactName or "",
 			}
+			jobPlace = {"submission": submission, "activity": activity}
 			recordDoctype, recordName, creationNote = CreateSupplierQuoteFromEmail(
-				project, supplier, senderDetails, attachmentList,
+				project, supplier, senderDetails, attachmentList, jobPlace,
 			)
 		else:
 			recordDoctype, recordName = CreateRecordFromSender(
@@ -344,7 +350,7 @@ def FileEmailToRecord(
 	if creationNote and recordDoctype == SUPPLIER_QUOTE_TARGET:
 		from m365email.m365email.send_to_erp_procurement import AutoImportNewQuote
 
-		importOutcome = AutoImportNewQuote(recordName, createdFiles)
+		importOutcome = AutoImportNewQuote(recordName, createdFiles, activity)
 		creationNote = " ".join(part for part in (creationNote, importOutcome["note"]) if part)
 		recordURL = importOutcome["record_url"] or recordURL
 

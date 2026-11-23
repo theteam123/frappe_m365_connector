@@ -6,7 +6,7 @@
 	<title>Send to ERP</title>
 	<script src="https://appsforoffice.microsoft.com/lib/1.1/hosted/office.js"></script>
 	<script src="msal-browser.min.js"></script>
-	<link rel="stylesheet" href="taskpane.css?v=12" />
+	<link rel="stylesheet" href="taskpane.css?v=13" />
 </head>
 <body>
 	<main id="app">
@@ -69,6 +69,18 @@
 					<input id="projectSearch" type="text" placeholder="Search jobs…" autocomplete="off" />
 					<ul id="projectResults" class="results"></ul>
 					<p id="projectChosen" class="chosen hidden"></p>
+					<!-- Optional: the submission and activity the quote is for (Paul, 2026-11-23) -->
+					<label for="submissionSearch">Submission <span class="muted">(optional)</span></label>
+					<input id="submissionSearch" type="text" placeholder="Pick the job first" autocomplete="off" disabled />
+					<ul id="submissionResults" class="results"></ul>
+					<p id="submissionChosen" class="chosen hidden"></p>
+					<button id="submissionClear" type="button" class="link hidden">Clear submission</button>
+					<label for="activitySearch">Activity <span class="muted">(optional)</span></label>
+					<p class="muted hint">Every line of the quote goes under this activity.</p>
+					<input id="activitySearch" type="text" placeholder="Pick the job first" autocomplete="off" disabled />
+					<ul id="activityResults" class="results"></ul>
+					<p id="activityChosen" class="chosen hidden"></p>
+					<button id="activityClear" type="button" class="link hidden">Clear activity</button>
 					<label for="supplierSearch">Supplier</label>
 					<p id="supplierHint" class="muted hint"></p>
 					<input id="supplierSearch" type="text" placeholder="Search suppliers…" autocomplete="off" />
@@ -103,6 +115,6 @@
 		</section>
 	</main>
 
-	<script src="taskpane.js?v=12"></script>
+	<script src="taskpane.js?v=13"></script>
 </body>
 </html>
