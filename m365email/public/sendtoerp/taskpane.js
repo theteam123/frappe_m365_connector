@@ -64,6 +64,8 @@ const state = {
 	attachments: [], // {id, name, selected}
 	target: null, // {doctype, value, label, create}
 	project: null, // {value, label} — the job for a new Supplier Quote
+	submission: null, // {value, label} — optional: the job's submission the quote is for
+	activity: null, // {value, label, submission} — optional: the activity every line goes under
 	supplier: null, // {value, label} — the supplier for a new Supplier Quote, when picked or known
 	suggestionRun: 0, // increments per PO suggestion, so a stale reply is ignored
 	senderName: "", // the person the email is from: a forwarded email's original sender
@@ -620,12 +622,21 @@ function toLocalISODate(date) {
 /* ---- Create new Supplier Quote: pick the job, and the supplier when it is not known ---- */
 
 // A small type-ahead picker: search as the user types, list results, remember the choice.
-function wirePicker(prefix, search, onChoose) {
+// NOTE: With listOnFocus, the whole (short) list shows as soon as the box is entered: a job has
+//       only a handful of submissions and activities, so nobody should have to guess a name.
+function wirePicker(prefix, search, onChoose, options = {}) {
 	let timer = null;
+	const minChars = options.listOnFocus ? 0 : MIN_SEARCH_CHARS;
+	if (options.listOnFocus) {
+		$(`${prefix}Search`).addEventListener("focus", () => {
+			const txt = $(`${prefix}Search`).value.trim();
+			runPickerSearch(prefix, search, onChoose, txt);
+		});
+	}
 	$(`${prefix}Search`).addEventListener("input", () => {
 		clearTimeout(timer);
 		const txt = $(`${prefix}Search`).value.trim();
-		if (txt.length < MIN_SEARCH_CHARS) {
+		if (txt.length < minChars) {
 			$(`${prefix}Results`).innerHTML = "";
 			return;
 		}
@@ -665,7 +676,78 @@ function chooseProject(row) {
 	state.project = { value: row.value, label: row.label };
 	$("projectChosen").textContent = `→ ${row.label}`;
 	show("projectChosen");
+	// NOTE: A submission or activity belongs to one job: a new job starts them again.
+	clearSubmission();
+	setJobPickersEnabled(true);
 	refreshFileButton();
+}
+
+function setJobPickersEnabled(isEnabled) {
+	const placeholder = isEnabled ? "Leave blank, or pick…" : "Pick the job first";
+	["submissionSearch", "activitySearch"].forEach((id) => {
+		$(id).disabled = !isEnabled;
+		$(id).placeholder = placeholder;
+	});
+}
+
+function chooseSubmission(row) {
+	clearDone();
+	state.submission = { value: row.value, label: row.label };
+	showChosen("submission", row.label);
+	// NOTE: An activity of another submission no longer fits.
+	if (state.activity && state.activity.submission !== row.value) clearActivity();
+}
+
+// NOTE: The activity decides the submission, so picking one fills the submission in.
+function chooseActivity(row) {
+	clearDone();
+	state.activity = { value: row.value, label: row.label, submission: row.submission };
+	showChosen("activity", row.label);
+	const shouldFillSubmission = !state.submission || state.submission.value !== row.submission;
+	if (row.submission && shouldFillSubmission) {
+		state.submission = { value: row.submission, label: row.sublabel || "" };
+		showChosen("submission", row.sublabel || "");
+	}
+}
+
+function showChosen(prefix, label) {
+	$(`${prefix}Results`).innerHTML = "";
+	$(`${prefix}Search`).value = "";
+	$(`${prefix}Chosen`).textContent = `→ ${label}`;
+	show(`${prefix}Chosen`);
+	show(`${prefix}Clear`);
+}
+
+function clearSubmission() {
+	state.submission = null;
+	hideChosen("submission");
+	clearActivity();
+}
+
+function clearActivity() {
+	state.activity = null;
+	hideChosen("activity");
+}
+
+function hideChosen(prefix) {
+	$(`${prefix}Results`).innerHTML = "";
+	hide(`${prefix}Chosen`);
+	hide(`${prefix}Clear`);
+}
+
+function searchSubmissions(txt) {
+	if (!state.project) return Promise.resolve([]);
+	return apiGet("procurement:SearchQuoteSubmissions", { project: state.project.value, txt });
+}
+
+function searchActivities(txt) {
+	if (!state.project) return Promise.resolve([]);
+	const submission = state.submission ? state.submission.value : "";
+	return apiGet("procurement:SearchQuoteActivities", {
+		project: state.project.value,
+		submission,
+		txt,
+	});
 }
 
 function chooseSupplier(row) {
@@ -683,6 +765,8 @@ function chooseSupplier(row) {
 async function showQuoteFields() {
 	state.project = null;
 	state.supplier = null;
+	clearSubmission();
+	setJobPickersEnabled(false);
 	hide("projectChosen");
 	hide("supplierChosen");
 	show("quoteFields");
@@ -900,6 +984,8 @@ function fileToRecord(common) {
 				new_email: isCreate ? personValue("personEmail", state.senderEmail) : "",
 				contact: chosenContact(),
 				project: isCreate && state.project ? state.project.value : "",
+				submission: isCreate && state.submission ? state.submission.value : "",
+				activity: isCreate && state.activity ? state.activity.value : "",
 				supplier: isCreate && state.supplier ? state.supplier.value : "",
 			},
 			common
@@ -1082,6 +1168,16 @@ function wireEvents() {
 		(txt) => apiGet("SearchTargets", { target_doctype: PROJECT_TYPE, txt }),
 		chooseProject
 	);
+	wirePicker("submission", searchSubmissions, chooseSubmission, { listOnFocus: true });
+	wirePicker("activity", searchActivities, chooseActivity, { listOnFocus: true });
+	$("submissionClear").addEventListener("click", () => {
+		clearDone();
+		clearSubmission();
+	});
+	$("activityClear").addEventListener("click", () => {
+		clearDone();
+		clearActivity();
+	});
 	wirePicker(
 		"supplier",
 		(txt) => apiGet("procurement:SearchSuppliers", { txt }),
