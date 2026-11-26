@@ -42,6 +42,10 @@ const NO_CONTACT_PICKER_TYPES = ["Contact", "Candidate", "Employee", "ToDo"];
 const DATE_PART_WIDTH = 2; // month and day in YYYY-MM-DD
 const PDF_NAME_PATTERN = /\.pdf$/i;
 const INVOICE_WORD_PATTERN = /invoice/i;
+// "Quote 12345", "Quotation No. AB-1234", "Q#5521": the supplier's own quote number. The token
+// must contain a digit, so a subject like "Quote for the job" guesses nothing.
+const QUOTE_NUMBER_PATTERN =
+	/\b(?:quotation|quote|qte|q)\s*(?:no\.?|number|ref|#)?\s*[:#-]?\s*((?=[A-Z0-9\-\/]*\d)[A-Z0-9][A-Z0-9\-\/]{2,})/i;
 
 // Microsoft 365 sign-in (Nested App Authentication). These are public OAuth
 // identifiers for the existing m365email Azure app — not secrets.
@@ -765,12 +769,24 @@ function chooseSupplier(row) {
 async function showQuoteFields() {
 	state.project = null;
 	state.supplier = null;
+	$("supplierQuoteNumber").value = guessSupplierQuoteNumber(emailMeta().subject);
 	clearSubmission();
 	setJobPickersEnabled(false);
 	hide("projectChosen");
 	hide("supplierChosen");
 	show("quoteFields");
 	applyGuessedSupplier();
+}
+
+/**
+ * Guess the supplier's own quote number from the email subject, to pre-fill the box.
+ * The person can edit it; an empty string means nothing looked like a quote number.
+ * @param {string} subject The email's subject line.
+ * @returns {string} The guessed number, or "".
+ */
+function guessSupplierQuoteNumber(subject) {
+	const match = QUOTE_NUMBER_PATTERN.exec(subject || "");
+	return match ? match[1] : "";
 }
 
 // Fill the supplier from the contact's company or email domain, unless the user picked one.
@@ -914,7 +930,11 @@ function refreshFileButton() {
 	if (doctype === TICKET_TYPE) hasContent = wantsEmail || hasComment;
 	// A new quote needs its job; an invoice needs the supplier's invoice number.
 	const isNewQuote = doctype === QUOTE_TYPE && state.target && state.target.create;
-	if (isNewQuote) hasContent = hasContent && Boolean(state.project);
+	// A new quote also needs the supplier's own quote number (Paul, 2026-11-26).
+	if (isNewQuote) {
+		hasContent = hasContent && Boolean(state.project);
+		hasContent = hasContent && $("supplierQuoteNumber").value.trim() !== "";
+	}
 	if (isEnteringInvoice()) hasContent = $("invoiceNumber").value.trim() !== "";
 	// Paul, 2026-11-07: after success the button greys out and says so, so nobody presses it
 	// again thinking nothing happened. Choosing something else brings it back.
@@ -987,6 +1007,7 @@ function fileToRecord(common) {
 				submission: isCreate && state.submission ? state.submission.value : "",
 				activity: isCreate && state.activity ? state.activity.value : "",
 				supplier: isCreate && state.supplier ? state.supplier.value : "",
+				supplier_quote_number: isCreate ? $("supplierQuoteNumber").value.trim() : "",
 			},
 			common
 		)
@@ -1163,6 +1184,7 @@ function wireEvents() {
 	$("openRecord").addEventListener("click", openRecord);
 	$("enterInvoice").addEventListener("change", refreshInvoiceInputs);
 	$("invoiceNumber").addEventListener("input", refreshFileButton);
+	$("supplierQuoteNumber").addEventListener("input", refreshFileButton);
 	wirePicker(
 		"project",
 		(txt) => apiGet("SearchTargets", { target_doctype: PROJECT_TYPE, txt }),

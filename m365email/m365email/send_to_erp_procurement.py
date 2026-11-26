@@ -180,6 +180,7 @@ def CreateSupplierQuoteFromEmail(
 	sender: dict,
 	attachmentList: list[dict],
 	jobPlace: dict | None = None,
+	supplierQuoteNumber: str = "",
 ) -> tuple[str, str, str]:
 	"""Create the Draft Supplier Quote for "Create new" on a quote email.
 
@@ -194,6 +195,7 @@ def CreateSupplierQuoteFromEmail(
 			is a Contact the user picked, or "" to find or create one for that person.
 		attachmentList: The parsed attachments; PDFs among them are read for the supplier.
 		jobPlace: {submission, activity} the user picked on the job, either or both optional.
+		supplierQuoteNumber: The supplier's own quote number. Required (Paul, 2026-11-26).
 
 	Returns:
 		("Supplier Quote", quote name, a sentence saying how the supplier was found).
@@ -207,6 +209,10 @@ def CreateSupplierQuoteFromEmail(
 	if not frappe.has_permission(SUPPLIER_QUOTE, "create"):
 		message = _("You do not have permission to create a Supplier Quote.")
 		frappe.throw(message, frappe.PermissionError)
+
+	quoteNumber = (supplierQuoteNumber or "").strip()
+	if not quoteNumber:
+		frappe.throw(_("Enter the supplier's own quote number before creating the quote."))
 
 	contactName = people.ResolveChosenContact(sender.get("contact") or "")
 	people.AssertNotColleague(contactName)
@@ -235,6 +241,7 @@ def CreateSupplierQuoteFromEmail(
 	submission, activity = place.get("submission") or None, place.get("activity") or None
 	quote = CreateDraftQuoteFromEmail(
 		project, organisation, contactName, quoteDate, submission, activity,
+		supplierQuoteNumber=quoteNumber,
 	)
 	LinkContactToSupplier(contactName, organisation)
 
