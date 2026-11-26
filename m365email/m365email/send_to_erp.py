@@ -220,6 +220,7 @@ def FileEmailToRecord(
 	contact: str = "",
 	submission: str = "",
 	activity: str = "",
+	supplier_quote_number: str = "",
 ) -> dict:
 	"""File an email and/or its attachments against a record or a new task.
 
@@ -254,6 +255,8 @@ def FileEmailToRecord(
 		submission: For "create new" Supplier Quote, an optional Submission on the job.
 		activity: For "create new" Supplier Quote, an optional Activity on the job; every
 			imported line goes under it (Paul, 2026-11-23).
+		supplier_quote_number: For "create new" Supplier Quote, the supplier's own quote number.
+			Required (Paul, 2026-11-26).
 
 	Returns:
 		{success, communication, files, message, record, record_url} describing what was
@@ -313,7 +316,7 @@ def FileEmailToRecord(
 			}
 			jobPlace = {"submission": submission, "activity": activity}
 			recordDoctype, recordName, creationNote = CreateSupplierQuoteFromEmail(
-				project, supplier, senderDetails, attachmentList, jobPlace,
+				project, supplier, senderDetails, attachmentList, jobPlace, supplier_quote_number,
 			)
 		else:
 			recordDoctype, recordName = CreateRecordFromSender(
